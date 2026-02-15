@@ -13,7 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .account_store import AccountState
-from .const import DOMAIN, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
+from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,6 +89,14 @@ class OsrsWebhookStatusSensor(SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_status"
         self._attr_native_value = "ready"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        webhook_id = self._entry.data.get(CONF_WEBHOOK_ID, "")
+        return {
+            "webhook_id": webhook_id,
+            "webhook_url": f"/api/webhook/{webhook_id}",
+        }
 
     @property
     def device_info(self):

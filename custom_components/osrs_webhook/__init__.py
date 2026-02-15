@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .account_store import AccountStore
-from .const import DOMAIN, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE
+from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE
 from .dedupe import DedupeCache
 from .history import HistoryStore
 from .storage import get_store
 from .webhook import async_register_webhook
 
 PLATFORMS: list[str] = ["sensor"]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -41,6 +45,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     async_register_webhook(hass, entry)
+
+    webhook_id = entry.data.get(CONF_WEBHOOK_ID, "")
+    _LOGGER.info("OSRS Webhook registered at /api/webhook/%s", webhook_id)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
