@@ -19,8 +19,13 @@ for mod_name in (
     "homeassistant",
     "homeassistant.core",
     "homeassistant.config_entries",
+    "homeassistant.components",
+    "homeassistant.components.sensor",
     "homeassistant.helpers",
     "homeassistant.helpers.webhook",
+    "homeassistant.helpers.dispatcher",
+    "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.storage",
 ):
     sys.modules.setdefault(mod_name, MagicMock())
 
