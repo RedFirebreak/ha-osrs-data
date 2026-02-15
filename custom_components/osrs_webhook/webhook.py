@@ -47,14 +47,17 @@ def _extract_image_metadata(file_field: Any) -> dict[str, Any] | None:
     """Extract metadata from an uploaded file field (no bytes persisted)."""
     if file_field is None:
         return None
+
+    size: int | None = None
+    if hasattr(file_field, "file") and file_field.file:
+        file_field.file.seek(0, 2)
+        size = file_field.file.tell()
+        file_field.file.seek(0)
+
     return {
         "filename": getattr(file_field, "filename", None),
         "content_type": getattr(file_field, "content_type", None),
-        "size": (
-            len(file_field.file.read())
-            if hasattr(file_field, "file") and file_field.file
-            else None
-        ),
+        "size": size,
     }
 
 
