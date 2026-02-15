@@ -1,0 +1,17 @@
+{
+  "type": "ACHIEVEMENT_DIARY",
+  "playerName": "DiaryDoer",
+  "accountType": "NORMAL",
+  "dinkAccountHash": "diary234hash567abc",
+  "seasonalWorld": false,
+  "world": 518,
+  "extra": {
+    "area": "Varrock",
+    "difficulty": "HARD",
+    "total": 15,
+    "tasksCompleted": 152,
+    "tasksTotal": 492,
+    "areaTasksCompleted": 37,
+    "areaTasksTotal": 42
+  }
+}

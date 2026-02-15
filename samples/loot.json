@@ -1,0 +1,24 @@
+{
+  "type": "LOOT",
+  "playerName": "IronPlayer",
+  "accountType": "IRONMAN",
+  "dinkAccountHash": "loot123hash456abc",
+  "seasonalWorld": false,
+  "world": 302,
+  "regionId": 14642,
+  "extra": {
+    "items": [
+      {
+        "id": 11286,
+        "quantity": 1,
+        "priceEach": 42069,
+        "name": "Dragon scimitar",
+        "rarity": 0.01,
+        "criteria": ["VALUE"]
+      }
+    ],
+    "source": "Chambers of Xeric",
+    "category": "EVENT",
+    "killCount": 60
+  }
+}

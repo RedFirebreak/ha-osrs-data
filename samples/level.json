@@ -1,0 +1,24 @@
+{
+  "type": "LEVEL",
+  "playerName": "PlayerOne",
+  "accountType": "NORMAL",
+  "dinkAccountHash": "abc123def456ghi789",
+  "seasonalWorld": false,
+  "world": 518,
+  "regionId": 12850,
+  "extra": {
+    "levelledSkills": {
+      "Attack": 70
+    },
+    "allSkills": {
+      "Attack": 70,
+      "Strength": 60,
+      "Defence": 50,
+      "Hitpoints": 55
+    },
+    "combatLevel": {
+      "value": 85,
+      "increased": true
+    }
+  }
+}

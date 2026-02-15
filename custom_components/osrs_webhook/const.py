@@ -11,6 +11,8 @@ STORAGE_KEY = f"{DOMAIN}_store"
 
 # Data key for the per-entry AccountStore kept in hass.data
 DATA_ACCOUNT_STORE = "account_store"
+DATA_HISTORY_STORE = "history_store"
+DATA_DEDUPE_CACHE = "dedupe_cache"
 
 # Dispatcher signal for account updates
 SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
