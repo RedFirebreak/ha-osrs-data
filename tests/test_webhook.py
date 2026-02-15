@@ -37,6 +37,7 @@ if _root not in sys.path:
 from custom_components.osrs_webhook.webhook import (  # noqa: E402
     _build_normalized_event,
     _extract_image_metadata,
+    _get_file_size,
     _handle_webhook,
 )
 
@@ -155,7 +156,17 @@ class TestExtractImageMetadata:
         assert result is not None
         assert result["filename"] == "screenshot.png"
         assert result["content_type"] == "image/png"
-        assert result["size"] == len(file_data)
+        # size is resolved asynchronously via hass.async_add_executor_job
+        assert result["size"] is None
+
+    def test_get_file_size(self):
+        """_get_file_size correctly measures file size via seek/tell."""
+        file_data = b"\x89PNG" + b"\x00" * 512
+        file_obj = io.BytesIO(file_data)
+        size = _get_file_size(file_obj)
+        assert size == len(file_data)
+        # cursor should be reset to start
+        assert file_obj.tell() == 0
 
     def test_file_field_without_file_attribute(self):
         """Object without a .file attribute."""
@@ -181,6 +192,7 @@ class TestHandleWebhook:
         hass = MagicMock()
         hass.bus = MagicMock()
         hass.bus.async_fire = MagicMock()
+        hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
         return hass
 
     def _make_multipart_request(
