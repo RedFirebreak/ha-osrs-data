@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import webhook
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
+from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, SIGNAL_ACCOUNT_UPDATED
 from .parser.dispatcher import dispatch as dispatch_parser
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,21 +91,28 @@ async def _handle_webhook(
             payload = await request.json()
 
         event_data = _build_normalized_event(payload, image_meta)
-        hass.bus.async_fire(EVENT_TYPE, event_data)
 
         # Parse event and update account store
         event_type = payload.get("type", "UNKNOWN")
         extra = payload.get("extra", {})
         player_name = payload.get("playerName", "Unknown")
         account_hash = payload.get("dinkAccountHash")
+        account_id = account_hash or player_name
 
         parsed = dispatch_parser(event_type, extra, player_name)
 
         if parsed is not None:
-            # Look up the correct AccountStore across all config entries
+            # Look up the correct entry data across all config entries
             for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
                 if not isinstance(entry_data, dict):
                     continue
+
+                # Dedupe check
+                dedupe = entry_data.get(DATA_DEDUPE_CACHE)
+                if dedupe is not None and dedupe.is_duplicate(account_id, event_type, extra):
+                    _LOGGER.debug("Dropping duplicate event %s for %s", event_type, account_id)
+                    return {"ok": True, "duplicate": True}
+
                 store = entry_data.get(DATA_ACCOUNT_STORE)
                 if store is None:
                     continue
@@ -116,9 +123,18 @@ async def _handle_webhook(
                     parsed["data"],
                     player_name=player_name,
                 )
+
+                # Record to history buffer
+                history_store = entry_data.get(DATA_HISTORY_STORE)
+                if history_store is not None:
+                    hist = history_store.get_or_create(account_id)
+                    hist.record(event_type, parsed["summary"], parsed["data"])
+
                 async_dispatcher_send(
                     hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
                 )
+
+        hass.bus.async_fire(EVENT_TYPE, event_data)
 
         return {"ok": True}
     except Exception as exc:
