@@ -7,7 +7,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers import webhook
+from homeassistant.components.webhook import async_register
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, SIGNAL_ACCOUNT_UPDATED
@@ -158,7 +158,7 @@ async def _handle_webhook(
 def async_register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> None:
     webhook_id = entry.data[CONF_WEBHOOK_ID]
 
-    webhook.async_register(
+    async_register(
         hass=hass,
         domain=DOMAIN,
         name="OSRS Webhook",

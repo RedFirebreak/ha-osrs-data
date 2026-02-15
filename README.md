@@ -14,7 +14,9 @@ A Home Assistant custom integration that receives RuneLite (Dink) webhook notifi
 3. Restart Home Assistant.
 
 ### Manual
-Copy `custom_components/osrs_webhook` into your Home Assistant `custom_components/` folder and restart.
+Copy `custom_components/osrs_webhook` from this repository into your Home Assistant `config/custom_components/` folder and restart.
+
+**Important:** The folder must be named `osrs_webhook` (matching the domain in manifest.json), not `ha-osrs-runelite-webhooks`.
 
 ## Setup
 
