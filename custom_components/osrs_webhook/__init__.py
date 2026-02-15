@@ -13,6 +13,12 @@ from .webhook import async_register_webhook
 PLATFORMS: list[str] = ["sensor"]
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the OSRS Webhook component."""
+    # Config entry setup is used, so just return True
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OSRS Webhook from a config entry."""
     hass.data.setdefault(DOMAIN, {})
