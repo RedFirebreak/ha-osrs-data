@@ -8,8 +8,10 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import webhook
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID
+from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
+from .parser.dispatcher import dispatch as dispatch_parser
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,6 +92,33 @@ async def _handle_webhook(
 
         event_data = _build_normalized_event(payload, image_meta)
         hass.bus.async_fire(EVENT_TYPE, event_data)
+
+        # Parse event and update account store
+        event_type = payload.get("type", "UNKNOWN")
+        extra = payload.get("extra", {})
+        player_name = payload.get("playerName", "Unknown")
+        account_hash = payload.get("dinkAccountHash")
+
+        parsed = dispatch_parser(event_type, extra, player_name)
+
+        if parsed is not None:
+            # Look up the correct AccountStore across all config entries
+            for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+                if not isinstance(entry_data, dict):
+                    continue
+                store = entry_data.get(DATA_ACCOUNT_STORE)
+                if store is None:
+                    continue
+                acct = store.get_or_create(account_hash, player_name)
+                acct.record_event(
+                    event_type,
+                    parsed["summary"],
+                    parsed["data"],
+                    player_name=player_name,
+                )
+                async_dispatcher_send(
+                    hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
+                )
 
         return {"ok": True}
     except Exception as exc:
