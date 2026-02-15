@@ -167,3 +167,10 @@ The `data` field contains event-type-specific parsed data (see `samples/` for fu
 ## Privacy & Security
 
 Webhook URLs are effectively secret tokens. If your Home Assistant is exposed publicly, treat the webhook URL as sensitive and avoid sharing it.
+
+## Developer References
+
+- [Home Assistant Developer Documentation](https://developers.home-assistant.io/)
+- [Async / Blocking Operations](https://developers.home-assistant.io/docs/asyncio_blocking_operations/)
+- [Config Flow](https://developers.home-assistant.io/docs/config_entries_config_flow_handler/)
+- [Options Flow](https://developers.home-assistant.io/docs/config_entries_options_flow_handler/)

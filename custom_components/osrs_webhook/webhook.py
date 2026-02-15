@@ -45,21 +45,26 @@ def _build_normalized_event(
     return event
 
 
+def _get_file_size(file_obj: Any) -> int:
+    """Get file size by seeking (blocking I/O, run in executor)."""
+    file_obj.seek(0, 2)
+    size = file_obj.tell()
+    file_obj.seek(0)
+    return size
+
+
 def _extract_image_metadata(file_field: Any) -> dict[str, Any] | None:
-    """Extract metadata from an uploaded file field (no bytes persisted)."""
+    """Extract basic metadata from an uploaded file field (no bytes persisted).
+
+    Note: call _get_file_size via hass.async_add_executor_job for the size.
+    """
     if file_field is None:
         return None
-
-    size: int | None = None
-    if hasattr(file_field, "file") and file_field.file:
-        file_field.file.seek(0, 2)
-        size = file_field.file.tell()
-        file_field.file.seek(0)
 
     return {
         "filename": getattr(file_field, "filename", None),
         "content_type": getattr(file_field, "content_type", None),
-        "size": size,
+        "size": None,
     }
 
 
@@ -86,7 +91,12 @@ async def _handle_webhook(
             raw = form.get("payload_json")
             if raw:
                 payload = json.loads(raw)
-            image_meta = _extract_image_metadata(form.get("file"))
+            file_field = form.get("file")
+            image_meta = _extract_image_metadata(file_field)
+            if image_meta is not None and hasattr(file_field, "file") and file_field.file:
+                image_meta["size"] = await hass.async_add_executor_job(
+                    _get_file_size, file_field.file
+                )
         else:
             payload = await request.json()
 
@@ -154,4 +164,5 @@ def async_register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> None:
         name="OSRS Webhook",
         webhook_id=webhook_id,
         handler=_handle_webhook,
+        allowed_methods=["POST"],
     )

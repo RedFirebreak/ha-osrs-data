@@ -155,7 +155,8 @@ class TestExtractImageMetadata:
         assert result is not None
         assert result["filename"] == "screenshot.png"
         assert result["content_type"] == "image/png"
-        assert result["size"] == len(file_data)
+        # size is resolved asynchronously via hass.async_add_executor_job
+        assert result["size"] is None
 
     def test_file_field_without_file_attribute(self):
         """Object without a .file attribute."""
@@ -181,6 +182,7 @@ class TestHandleWebhook:
         hass = MagicMock()
         hass.bus = MagicMock()
         hass.bus.async_fire = MagicMock()
+        hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
         return hass
 
     def _make_multipart_request(
