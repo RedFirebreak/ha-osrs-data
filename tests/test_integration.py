@@ -179,6 +179,8 @@ class TestWebhookIntegration:
         result = await _handle_webhook(hass, "wh-id", request)
 
         assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         # The account should NOT be created since LOGIN is not a parsed type
         assert len(store.accounts) == 0
 
