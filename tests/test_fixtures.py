@@ -17,7 +17,6 @@ for mod_name in (
     "homeassistant.components.sensor",
     "homeassistant.components.webhook",
     "homeassistant.helpers",
-    "homeassistant.helpers.webhook",
     "homeassistant.helpers.dispatcher",
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.storage",
