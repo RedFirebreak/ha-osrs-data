@@ -19,7 +19,10 @@ def parse(extra: dict[str, Any], player_name: str) -> dict[str, Any]:
         item.get("priceEach", 0) * item.get("quantity", 1) for item in items
     )
     item_names = [item.get("name", "Unknown") for item in items]
-    summary = f"{player_name} looted {', '.join(item_names)} from {source}"
+    if item_names:
+        summary = f"{player_name} looted {', '.join(item_names)} from {source}"
+    else:
+        summary = f"{player_name} received loot from {source}"
 
     parsed_items = []
     for item in items:

@@ -101,6 +101,14 @@ class AccountStore:
         self._by_name[norm] = state
         return state
 
+    def get_by_hash(self, account_hash: str) -> AccountState | None:
+        """Look up an account by its hash directly."""
+        state = self._by_hash.get(account_hash)
+        if state is not None:
+            return state
+        # Fallback: check if the hash is a normalized-name key
+        return self._by_name.get(account_hash)
+
     @property
     def accounts(self) -> list[AccountState]:
         """Return all known account states (deduplicated)."""

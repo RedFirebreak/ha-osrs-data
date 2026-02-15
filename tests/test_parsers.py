@@ -133,6 +133,7 @@ class TestLootParser:
         assert result is not None
         assert result["data"]["items"] == []
         assert result["data"]["totalValue"] == 0
+        assert "received loot" in result["summary"]
 
     def test_no_kill_count(self):
         result = dispatch("LOOT", {"items": [], "source": "Test"}, "Player")

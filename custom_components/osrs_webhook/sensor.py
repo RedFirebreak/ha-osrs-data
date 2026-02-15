@@ -29,9 +29,12 @@ _COUNTER_SENSORS: list[tuple[str, str, str]] = [
 ]
 
 
+_MAX_SLUG_LENGTH = 48
+
+
 def _slugify_account(account_hash: str) -> str:
     """Create a short, entity-safe slug from an account identifier."""
-    return re.sub(r"[^a-z0-9]+", "_", account_hash.lower()).strip("_")[:48]
+    return re.sub(r"[^a-z0-9]+", "_", account_hash.lower()).strip("_")[:_MAX_SLUG_LENGTH]
 
 
 async def async_setup_entry(
@@ -53,11 +56,7 @@ async def async_setup_entry(
         known_accounts.add(account_hash)
 
         store = hass.data[DOMAIN][entry.entry_id][DATA_ACCOUNT_STORE]
-        state: AccountState | None = None
-        for acct in store.accounts:
-            if acct.account_hash == account_hash:
-                state = acct
-                break
+        state = store.get_by_hash(account_hash)
         if state is None:
             return
 

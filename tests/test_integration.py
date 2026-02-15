@@ -185,7 +185,7 @@ class TestWebhookIntegration:
         """Parsing does not depend on embeds being present."""
         hass, store = mock_hass
         payload = dict(LEVEL_PAYLOAD)
-        payload.pop("embeds", None)  # Ensure no embeds
+        payload.pop("embeds", None)  # Remove embeds if present to test without them
         request = self._make_json_request(payload)
 
         result = await _handle_webhook(hass, "wh-id", request)
