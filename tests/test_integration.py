@@ -113,7 +113,9 @@ class TestWebhookIntegration:
         request = self._make_json_request(LEVEL_PAYLOAD)
         result = await _handle_webhook(hass, "wh-id", request)
 
-        assert result == {"ok": True}
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         acct = store.get_or_create("hashAAA", "PlayerOne")
         assert acct.levels_total == 1
         assert acct.last_event_type == "LEVEL"
@@ -176,7 +178,9 @@ class TestWebhookIntegration:
         request = self._make_json_request(payload)
         result = await _handle_webhook(hass, "wh-id", request)
 
-        assert result == {"ok": True}
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         # The account should NOT be created since LOGIN is not a parsed type
         assert len(store.accounts) == 0
 
@@ -189,6 +193,6 @@ class TestWebhookIntegration:
         request = self._make_json_request(payload)
 
         result = await _handle_webhook(hass, "wh-id", request)
-        assert result == {"ok": True}
+        assert result.status == 200
         acct = store.get_or_create("hashAAA", "PlayerOne")
         assert acct.levels_total == 1

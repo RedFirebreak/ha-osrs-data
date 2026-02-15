@@ -225,7 +225,9 @@ class TestHandleWebhook:
         request = self._make_multipart_request(LEVEL_PAYLOAD)
         result = await _handle_webhook(mock_hass, "test-id", request)
 
-        assert result == {"ok": True}
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         mock_hass.bus.async_fire.assert_called_once()
         event_name, event_data = mock_hass.bus.async_fire.call_args[0]
         assert event_name == "osrs_webhook_event"
@@ -245,7 +247,9 @@ class TestHandleWebhook:
         request = self._make_multipart_request(LEVEL_PAYLOAD, file_field)
         result = await _handle_webhook(mock_hass, "test-id", request)
 
-        assert result == {"ok": True}
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         event_data = mock_hass.bus.async_fire.call_args[0][1]
         assert "image" in event_data
         assert event_data["image"]["filename"] == "screenshot.png"
@@ -257,22 +261,26 @@ class TestHandleWebhook:
         request = self._make_json_request(MINIMAL_PAYLOAD)
         result = await _handle_webhook(mock_hass, "test-id", request)
 
-        assert result == {"ok": True}
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         event_data = mock_hass.bus.async_fire.call_args[0][1]
         assert event_data["event_type"] == "DEATH"
         assert event_data["account"]["playerName"] == "TestUser"
 
     @pytest.mark.asyncio
     async def test_error_returns_ok_false(self, mock_hass):
-        """On error, return {ok: false} without crashing."""
+        """On error, return {ok: false} with 500 status without crashing."""
         request = MagicMock()
         request.headers = {"Content-Type": "application/json"}
         request.json = AsyncMock(side_effect=ValueError("bad json"))
 
         result = await _handle_webhook(mock_hass, "test-id", request)
 
-        assert result["ok"] is False
-        assert "error" in result
+        assert result.status == 500
+        body = json.loads(result.body)
+        assert body["ok"] is False
+        assert "error" in body
         mock_hass.bus.async_fire.assert_not_called()
 
     @pytest.mark.asyncio
@@ -284,6 +292,8 @@ class TestHandleWebhook:
 
         result = await _handle_webhook(mock_hass, "test-id", request)
 
-        assert result == {"ok": True}
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body == {"ok": True}
         event_data = mock_hass.bus.async_fire.call_args[0][1]
         assert event_data["event_type"] == "UNKNOWN"
