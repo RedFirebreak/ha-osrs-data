@@ -14,8 +14,11 @@ PLATFORMS: list[str] = ["sensor"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the OSRS Webhook component."""
-    # Config entry setup is used, so just return True
+    """Set up the OSRS Webhook component from configuration.yaml.
+    
+    This integration uses config entries exclusively, so this function
+    exists only to satisfy Home Assistant's integration requirements.
+    """
     return True
 
 
