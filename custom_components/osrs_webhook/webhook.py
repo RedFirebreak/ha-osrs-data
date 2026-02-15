@@ -5,6 +5,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from aiohttp.web import Response, json_response
+
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.webhook import async_register
@@ -123,7 +125,7 @@ async def _handle_webhook(
                 dedupe = entry_data.get(DATA_DEDUPE_CACHE)
                 if dedupe is not None and dedupe.is_duplicate(account_id, event_type, extra):
                     _LOGGER.debug("Dropping duplicate event %s for %s", event_type, account_id)
-                    return {"ok": True, "duplicate": True}
+                    return json_response({"ok": True, "duplicate": True})
 
                 store = entry_data.get(DATA_ACCOUNT_STORE)
                 if store is None:
@@ -149,10 +151,10 @@ async def _handle_webhook(
         # Fire event after dedupe so duplicate webhooks don't trigger automations
         hass.bus.async_fire(EVENT_TYPE, event_data)
 
-        return {"ok": True}
+        return json_response({"ok": True})
     except Exception as exc:
         _LOGGER.exception("Webhook handling failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        return json_response({"ok": False, "error": str(exc)}, status=500)
 
 
 def async_register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> None:
