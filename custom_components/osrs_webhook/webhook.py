@@ -98,6 +98,8 @@ async def _handle_webhook(
         player_name = payload.get("playerName", "Unknown")
         account_hash = payload.get("dinkAccountHash")
         account_id = account_hash or player_name
+        if not account_hash:
+            _LOGGER.debug("No dinkAccountHash; using playerName as account key")
 
         parsed = dispatch_parser(event_type, extra, player_name)
 
@@ -134,6 +136,7 @@ async def _handle_webhook(
                     hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
                 )
 
+        # Fire event after dedupe so duplicate webhooks don't trigger automations
         hass.bus.async_fire(EVENT_TYPE, event_data)
 
         return {"ok": True}
