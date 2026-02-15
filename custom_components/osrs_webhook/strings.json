@@ -1,0 +1,10 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OSRS Webhook",
+        "description": "Create a webhook endpoint for RuneLite/Dink notifications."
+      }
+    }
+  }
+}
