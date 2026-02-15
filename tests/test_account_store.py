@@ -13,6 +13,7 @@ for mod_name in (
     "homeassistant.config_entries",
     "homeassistant.components",
     "homeassistant.components.sensor",
+    "homeassistant.components.webhook",
     "homeassistant.helpers",
     "homeassistant.helpers.webhook",
     "homeassistant.helpers.dispatcher",
