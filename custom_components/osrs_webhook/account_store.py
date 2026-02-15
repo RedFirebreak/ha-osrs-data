@@ -34,6 +34,9 @@ class AccountState:
         self.last_event_data: dict[str, Any] = {}
         self.last_update: str | None = None
 
+        # Detail sensors: key → {value, attributes, last_update}
+        self.detail_sensors: dict[str, dict[str, Any]] = {}
+
     def _counter_attr(self, event_type: str) -> str | None:
         """Return the counter attribute name for a given event type."""
         mapping = {
@@ -46,6 +49,120 @@ class AccountState:
             "ACHIEVEMENT_DIARY": "diaries_total",
         }
         return mapping.get(event_type)
+
+    def _update_detail_sensors(
+        self, event_type: str, data: dict[str, Any]
+    ) -> None:
+        """Extract detail sensor entries from parsed event data."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        if event_type == "LEVEL":
+            # Store each levelled skill as its own sensor
+            for skill, level in data.get("levelledSkills", {}).items():
+                key = skill
+                self.detail_sensors[key] = {
+                    "value": level,
+                    "attributes": {"skill": skill},
+                    "last_update": now,
+                }
+            # Store combat level
+            if "combatLevel" in data:
+                self.detail_sensors["Combat Level"] = {
+                    "value": data["combatLevel"],
+                    "attributes": {
+                        "increased": data.get("combatLevelIncreased", False),
+                    },
+                    "last_update": now,
+                }
+
+        elif event_type == "LOOT":
+            source = data.get("source", "Unknown")
+            key = f"Loot - {source}"
+            self.detail_sensors[key] = {
+                "value": data.get("totalValue", 0),
+                "attributes": {
+                    "source": source,
+                    "items": data.get("items", []),
+                    "totalValue": data.get("totalValue", 0),
+                    "category": data.get("category"),
+                    "killCount": data.get("killCount"),
+                },
+                "last_update": now,
+            }
+
+        elif event_type == "DEATH":
+            killer = data.get("killerName", "Unknown")
+            key = f"Death - {killer}"
+            self.detail_sensors[key] = {
+                "value": data.get("valueLost", 0),
+                "attributes": {
+                    "killerName": killer,
+                    "valueLost": data.get("valueLost", 0),
+                    "isPvp": data.get("isPvp", False),
+                },
+                "last_update": now,
+            }
+
+        elif event_type == "PET":
+            pet_name = data.get("petName") or "Unknown"
+            key = f"Pet - {pet_name}"
+            self.detail_sensors[key] = {
+                "value": pet_name,
+                "attributes": {
+                    "petName": pet_name,
+                    "duplicate": data.get("duplicate", False),
+                    "milestone": data.get("milestone"),
+                },
+                "last_update": now,
+            }
+
+        elif event_type == "QUEST":
+            quest_name = data.get("questName", "Unknown")
+            key = f"Quest - {quest_name}"
+            self.detail_sensors[key] = {
+                "value": quest_name,
+                "attributes": {
+                    "questName": quest_name,
+                    "completedQuests": data.get("completedQuests"),
+                    "totalQuests": data.get("totalQuests"),
+                    "questPoints": data.get("questPoints"),
+                    "totalQuestPoints": data.get("totalQuestPoints"),
+                },
+                "last_update": now,
+            }
+
+        elif event_type == "COMBAT_ACHIEVEMENT":
+            task = data.get("task", "Unknown")
+            key = f"Combat Achievement - {task}"
+            self.detail_sensors[key] = {
+                "value": task,
+                "attributes": {
+                    "tier": data.get("tier"),
+                    "task": task,
+                    "taskPoints": data.get("taskPoints"),
+                    "totalPoints": data.get("totalPoints"),
+                    "currentTier": data.get("currentTier"),
+                    "justCompletedTier": data.get("justCompletedTier"),
+                },
+                "last_update": now,
+            }
+
+        elif event_type == "ACHIEVEMENT_DIARY":
+            area = data.get("area", "Unknown")
+            key = f"Achievement Diary - {area}"
+            self.detail_sensors[key] = {
+                "value": data.get("difficulty", "Unknown"),
+                "attributes": {
+                    "area": area,
+                    "difficulty": data.get("difficulty"),
+                    "total": data.get("total"),
+                    "tasksCompleted": data.get("tasksCompleted"),
+                    "tasksTotal": data.get("tasksTotal"),
+                    "areaTasksCompleted": data.get("areaTasksCompleted"),
+                    "areaTasksTotal": data.get("areaTasksTotal"),
+                },
+                "last_update": now,
+            }
 
     def record_event(
         self,
@@ -66,6 +183,8 @@ class AccountState:
         self.last_event_summary = summary
         self.last_event_data = data
         self.last_update = datetime.now(timezone.utc).isoformat()
+
+        self._update_detail_sensors(event_type, data)
 
 
 class AccountStore:

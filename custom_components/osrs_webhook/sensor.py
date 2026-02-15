@@ -47,14 +47,11 @@ async def async_setup_entry(
     async_add_entities([OsrsWebhookStatusSensor(entry)])
 
     known_accounts: set[str] = set()
+    known_detail_keys: dict[str, set[str]] = {}
 
     @callback
     def _handle_account_update(account_hash: str) -> None:
         """Create entities for a new account, or update existing ones."""
-        if account_hash in known_accounts:
-            return
-        known_accounts.add(account_hash)
-
         store = hass.data[DOMAIN][entry.entry_id][DATA_ACCOUNT_STORE]
         state = store.get_by_hash(account_hash)
         if state is None:
@@ -63,13 +60,27 @@ async def async_setup_entry(
         slug = _slugify_account(account_hash)
         new_entities: list[SensorEntity] = []
 
-        for suffix, attr, label in _COUNTER_SENSORS:
-            new_entities.append(
-                OsrsAccountCounterSensor(entry, state, slug, suffix, attr, label)
-            )
+        if account_hash not in known_accounts:
+            known_accounts.add(account_hash)
+            known_detail_keys[account_hash] = set()
 
-        new_entities.append(OsrsAccountLastEventSensor(entry, state, slug))
-        async_add_entities(new_entities)
+            for suffix, attr, label in _COUNTER_SENSORS:
+                new_entities.append(
+                    OsrsAccountCounterSensor(entry, state, slug, suffix, attr, label)
+                )
+
+            new_entities.append(OsrsAccountLastEventSensor(entry, state, slug))
+
+        # Create detail sensors for any new keys
+        for key in state.detail_sensors:
+            if key not in known_detail_keys[account_hash]:
+                known_detail_keys[account_hash].add(key)
+                new_entities.append(
+                    OsrsAccountDetailSensor(entry, state, slug, key)
+                )
+
+        if new_entities:
+            async_add_entities(new_entities)
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_ACCOUNT_UPDATED, _handle_account_update)
@@ -199,6 +210,72 @@ class OsrsAccountLastEventSensor(SensorEntity):
             attrs.update(self._state.last_event_data)
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Detail sensors ──────────────────────────────────────────────────
+
+
+_MAX_DETAIL_SLUG_LENGTH = 64
+
+
+def _slugify_detail_key(key: str) -> str:
+    """Create an entity-safe slug from a detail sensor key."""
+    return re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")[:_MAX_DETAIL_SLUG_LENGTH]
+
+
+class OsrsAccountDetailSensor(SensorEntity):
+    """Dynamic sensor for a specific event detail (skill level, loot source, etc.)."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+        detail_key: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._detail_key = detail_key
+        detail_slug = _slugify_detail_key(detail_key)
+        self._attr_unique_id = f"{state.account_hash}_detail_{detail_slug}"
+        self._attr_name = detail_key
+
+    @property
+    def native_value(self):
+        detail = self._state.detail_sensors.get(self._detail_key)
+        if detail is None:
+            return None
+        return detail.get("value")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        detail = self._state.detail_sensors.get(self._detail_key)
+        if detail is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        if detail.get("attributes"):
+            attrs.update(detail["attributes"])
+        if detail.get("last_update"):
+            attrs["last_update"] = detail["last_update"]
         return attrs
 
     @property
