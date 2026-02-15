@@ -1,12 +1,12 @@
 {
   "domain": "osrs_webhook",
   "name": "OSRS Webhook",
-  "version": "0.1.0",
-  "documentation": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks",
-  "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks/issues",
   "codeowners": ["@RedFirebreak"],
   "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks",
   "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks/issues",
   "requirements": [],
-  "dependencies": []
+  "version": "0.1.0"
 }
