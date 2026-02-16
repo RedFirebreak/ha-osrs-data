@@ -39,7 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     stored = await store.async_load()
     if stored and isinstance(stored, dict):
         history_store.load_dict(stored.get("history", {}))
-        account_store.load_dict(stored.get("accounts", []))
+        account_store.load_dict(stored.get("accounts") or [])
 
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
