@@ -1,4 +1,4 @@
-"""Per-account sensor entities for the OSRS Webhook integration."""
+"""Per-account sensor entities for the OSRS Data integration."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up OSRS Webhook sensors from a config entry."""
+    """Set up OSRS Data sensors from a config entry."""
     async_add_entities([OsrsWebhookStatusSensor(entry)])
 
     known_accounts: set[str] = set()
@@ -116,7 +116,7 @@ class OsrsWebhookStatusSensor(SensorEntity):
     def device_info(self):
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "OSRS Webhook",
+            "name": "OSRS Data",
             "manufacturer": "Custom",
             "model": "Webhook Receiver",
         }

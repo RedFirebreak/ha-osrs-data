@@ -1,4 +1,4 @@
-"""In-memory multi-account state store for OSRS Webhook."""
+"""In-memory multi-account state store for OSRS Data."""
 
 from __future__ import annotations
 

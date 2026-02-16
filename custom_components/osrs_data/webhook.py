@@ -189,7 +189,7 @@ def async_register_webhook(hass: HomeAssistant, entry: ConfigEntry) -> None:
     async_register(
         hass=hass,
         domain=DOMAIN,
-        name="OSRS Webhook",
+        name="OSRS Data",
         webhook_id=webhook_id,
         handler=_handle_webhook,
         allowed_methods=["POST"],

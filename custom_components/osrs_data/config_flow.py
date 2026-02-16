@@ -15,11 +15,11 @@ class OsrsWebhookConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         if user_input is None:
             schema = vol.Schema({
-                vol.Optional(CONF_TITLE, default="OSRS Webhook"): str,
+                vol.Optional(CONF_TITLE, default="OSRS Data"): str,
             })
             return self.async_show_form(step_id="user", data_schema=schema)
 
-        title = user_input.get(CONF_TITLE, "OSRS Webhook")
+        title = user_input.get(CONF_TITLE, "OSRS Data")
         webhook_id = async_generate_id()
 
         return self.async_create_entry(

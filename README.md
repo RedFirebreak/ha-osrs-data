@@ -1,4 +1,4 @@
-# OSRS Webhook (Home Assistant)
+# OSRS Data (Home Assistant)
 
 A Home Assistant custom integration that receives RuneLite (Dink) webhook notifications and turns them into:
 - Home Assistant events (for automations)
@@ -14,14 +14,14 @@ A Home Assistant custom integration that receives RuneLite (Dink) webhook notifi
 3. Restart Home Assistant.
 
 ### Manual
-Copy `custom_components/osrs_webhook` from this repository into your Home Assistant `config/custom_components/` folder and restart.
+Copy `custom_components/osrs_data` from this repository into your Home Assistant `config/custom_components/` folder and restart.
 
-**Important:** The folder must be named `osrs_webhook` (matching the domain in manifest.json), not `ha-osrs-runelite-webhooks`.
+**Important:** The folder must be named `osrs_data` (matching the domain in manifest.json), not `ha-osrs-runelite-webhooks`.
 
 ## Setup
 
 1. Go to **Settings → Devices & services → Add integration**
-2. Search for **OSRS Webhook**
+2. Search for **OSRS Data**
 3. Finish setup — the integration generates a unique webhook ID
 
 Your webhook URL will be:
@@ -74,7 +74,7 @@ If Dink retries a webhook (e.g., due to network issues), the integration ignores
 
 ## Automations
 
-The integration fires `osrs_webhook_event` on the Home Assistant event bus. Use an **Event trigger** to build automations.
+The integration fires `osrs_data_event` on the Home Assistant event bus. Use an **Event trigger** to build automations.
 
 ### Example: notify on rare loot
 
@@ -83,7 +83,7 @@ automation:
   - alias: "OSRS rare loot alert"
     trigger:
       - platform: event
-        event_type: osrs_webhook_event
+        event_type: osrs_data_event
         event_data:
           event_type: LOOT
     condition:
@@ -106,7 +106,7 @@ automation:
   - alias: "OSRS death flash"
     trigger:
       - platform: event
-        event_type: osrs_webhook_event
+        event_type: osrs_data_event
         event_data:
           event_type: DEATH
     action:
@@ -125,7 +125,7 @@ automation:
   - alias: "OSRS pet announcement"
     trigger:
       - platform: event
-        event_type: osrs_webhook_event
+        event_type: osrs_data_event
         event_data:
           event_type: PET
     action:
@@ -139,7 +139,7 @@ automation:
 
 ## Event data structure
 
-Every `osrs_webhook_event` contains:
+Every `osrs_data_event` contains:
 
 ```json
 {

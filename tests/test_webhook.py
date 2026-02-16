@@ -1,4 +1,4 @@
-"""Tests for the OSRS Webhook normalized event pipeline."""
+"""Tests for the OSRS Data normalized event pipeline."""
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ for mod_name in (
 ):
     sys.modules.setdefault(mod_name, MagicMock())
 
-# Import custom_components.osrs_webhook as a proper package
+# Import custom_components.osrs_data as a proper package
 _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_webhook.webhook import (  # noqa: E402
+from custom_components.osrs_data.webhook import (  # noqa: E402
     _build_normalized_event,
     _extract_image_metadata,
     _get_file_size,
@@ -230,7 +230,7 @@ class TestHandleWebhook:
         assert body == {"ok": True}
         mock_hass.bus.async_fire.assert_called_once()
         event_name, event_data = mock_hass.bus.async_fire.call_args[0]
-        assert event_name == "osrs_webhook_event"
+        assert event_name == "osrs_data_event"
         assert event_data["event_type"] == "LEVEL"
         assert event_data["account"]["playerName"] == "PlayerOne"
         assert event_data["data"] == LEVEL_PAYLOAD["extra"]

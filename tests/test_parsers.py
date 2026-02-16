@@ -26,7 +26,7 @@ _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_webhook.parser.dispatcher import (  # noqa: E402
+from custom_components.osrs_data.parser.dispatcher import (  # noqa: E402
     dispatch,
     SUPPORTED_TYPES,
 )

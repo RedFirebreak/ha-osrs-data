@@ -1,6 +1,6 @@
 {
-  "domain": "osrs_webhook",
-  "name": "OSRS Webhook",
+  "domain": "osrs_data",
+  "name": "OSRS Data",
   "codeowners": ["@RedFirebreak"],
   "config_flow": true,
   "dependencies": [],
@@ -8,5 +8,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "2026.2.16"
 }

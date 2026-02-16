@@ -19,7 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the OSRS Webhook component from configuration.yaml.
+    """Set up the OSRS Data component from configuration.yaml.
     
     This integration uses config entries exclusively, so this function
     exists only to satisfy Home Assistant's integration requirements.
@@ -28,7 +28,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up OSRS Webhook from a config entry."""
+    """Set up OSRS Data from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     history_store = HistoryStore()
@@ -51,7 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_register_webhook(hass, entry)
 
     webhook_id = entry.data.get(CONF_WEBHOOK_ID, "")
-    _LOGGER.info("OSRS Webhook registered at /api/webhook/%s", webhook_id)
+    _LOGGER.info("OSRS Data registered at /api/webhook/%s", webhook_id)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

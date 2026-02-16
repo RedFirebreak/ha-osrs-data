@@ -25,7 +25,7 @@ _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_webhook.account_store import (  # noqa: E402
+from custom_components.osrs_data.account_store import (  # noqa: E402
     AccountState,
     AccountStore,
 )

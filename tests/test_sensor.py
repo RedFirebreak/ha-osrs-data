@@ -1,4 +1,4 @@
-"""Tests for the OSRS Webhook sensor module."""
+"""Tests for the OSRS Data sensor module."""
 
 from __future__ import annotations
 
@@ -47,14 +47,14 @@ _sensor_mod.SensorEntity = _SensorEntity
 sys.modules["homeassistant.components.sensor"] = _sensor_mod
 
 # Force re-import of sensor module so it picks up our _SensorEntity
-sys.modules.pop("custom_components.osrs_webhook.sensor", None)
+sys.modules.pop("custom_components.osrs_data.sensor", None)
 
 _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_webhook.sensor import OsrsWebhookStatusSensor  # noqa: E402
-from custom_components.osrs_webhook.const import CONF_WEBHOOK_ID  # noqa: E402
+from custom_components.osrs_data.sensor import OsrsWebhookStatusSensor  # noqa: E402
+from custom_components.osrs_data.const import CONF_WEBHOOK_ID  # noqa: E402
 
 
 class TestOsrsWebhookStatusSensor:

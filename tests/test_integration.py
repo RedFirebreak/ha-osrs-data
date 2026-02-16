@@ -29,14 +29,14 @@ _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_webhook.account_store import AccountStore  # noqa: E402
-from custom_components.osrs_webhook.const import (  # noqa: E402
+from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
+from custom_components.osrs_data.const import (  # noqa: E402
     DATA_ACCOUNT_STORE,
     DATA_STORE,
     DOMAIN,
     SIGNAL_ACCOUNT_UPDATED,
 )
-from custom_components.osrs_webhook.webhook import _handle_webhook  # noqa: E402
+from custom_components.osrs_data.webhook import _handle_webhook  # noqa: E402
 
 
 # ── Sample payloads ──────────────────────────────────────────────────
@@ -156,7 +156,7 @@ class TestWebhookIntegration:
 
         # Patch dispatcher
         with patch(
-            "custom_components.osrs_webhook.webhook.async_dispatcher_send"
+            "custom_components.osrs_data.webhook.async_dispatcher_send"
         ) as mock_signal:
             await _handle_webhook(hass, "wh-id", request)
             mock_signal.assert_called_once_with(
