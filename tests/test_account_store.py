@@ -32,21 +32,14 @@ from custom_components.osrs_webhook.account_store import (  # noqa: E402
 
 
 class TestAccountState:
-    def test_initial_counters_are_zero(self):
+    def test_initial_state(self):
         state = AccountState("hash1", "PlayerOne")
-        assert state.levels_total == 0
-        assert state.loot_events_total == 0
-        assert state.deaths_total == 0
-        assert state.pets_total == 0
-        assert state.quests_total == 0
-        assert state.combat_tasks_total == 0
-        assert state.diaries_total == 0
         assert state.last_event_type is None
+        assert state.detail_sensors == {}
 
     def test_record_level_event(self):
         state = AccountState("hash1", "PlayerOne")
         state.record_event("LEVEL", "Levelled Attack to 70", {"levelledSkills": {"Attack": 70}})
-        assert state.levels_total == 1
         assert state.last_event_type == "LEVEL"
         assert state.last_event_summary == "Levelled Attack to 70"
         assert state.last_update is not None
@@ -56,29 +49,11 @@ class TestAccountState:
         state.record_event("LEVEL", "a", {})
         state.record_event("LEVEL", "b", {})
         state.record_event("DEATH", "died", {"valueLost": 100})
-        assert state.levels_total == 2
-        assert state.deaths_total == 1
         assert state.last_event_type == "DEATH"
 
-    def test_record_all_types(self):
-        state = AccountState("hash1", "Player")
-        for etype, attr in [
-            ("LEVEL", "levels_total"),
-            ("LOOT", "loot_events_total"),
-            ("DEATH", "deaths_total"),
-            ("PET", "pets_total"),
-            ("QUEST", "quests_total"),
-            ("COMBAT_ACHIEVEMENT", "combat_tasks_total"),
-            ("ACHIEVEMENT_DIARY", "diaries_total"),
-        ]:
-            state.record_event(etype, "summary", {})
-            assert getattr(state, attr) == 1
-
-    def test_unsupported_type_no_counter_change(self):
+    def test_unsupported_type_still_tracked(self):
         state = AccountState("hash1", "Player")
         state.record_event("LOGIN", "logged in", {})
-        # No counters should change, but last_event should still be tracked
-        assert state.levels_total == 0
         assert state.last_event_type == "LOGIN"
 
     def test_record_updates_player_name(self):
@@ -132,17 +107,17 @@ class TestAccountStore:
         store.get_or_create("hash1", "PlayerA")
         assert len(store.accounts) == 1
 
-    def test_separate_accounts_separate_counters(self):
+    def test_separate_accounts_separate_state(self):
         """Multiple accounts posting to the same store keep separate state."""
         store = AccountStore()
         a = store.get_or_create("hashA", "PlayerA")
         b = store.get_or_create("hashB", "PlayerB")
 
-        a.record_event("LEVEL", "a levelled", {})
-        a.record_event("LEVEL", "a levelled again", {})
+        a.record_event("LEVEL", "a levelled", {"levelledSkills": {"Attack": 70}})
+        a.record_event("LEVEL", "a levelled again", {"levelledSkills": {"Attack": 71}})
         b.record_event("DEATH", "b died", {"valueLost": 500})
 
-        assert a.levels_total == 2
-        assert a.deaths_total == 0
-        assert b.levels_total == 0
-        assert b.deaths_total == 1
+        assert a.last_event_type == "LEVEL"
+        assert "Attack" in a.detail_sensors
+        assert b.last_event_type == "DEATH"
+        assert len(b.detail_sensors) == 0

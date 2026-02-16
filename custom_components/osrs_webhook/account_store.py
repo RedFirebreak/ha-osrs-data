@@ -13,39 +13,76 @@ def _normalize_player_name(name: str) -> str:
 
 
 class AccountState:
-    """Per-account counters and last-event details."""
+    """Per-account event details and detail sensors."""
+
+    # Event types that get their own "Last <Type>" sensor
+    TYPED_EVENT_TYPES: tuple[str, ...] = (
+        "LOOT",
+        "DEATH",
+        "PET",
+        "QUEST",
+        "COMBAT_ACHIEVEMENT",
+        "ACHIEVEMENT_DIARY",
+        "COLLECTION",
+    )
 
     def __init__(self, account_hash: str, player_name: str) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
 
-        # Counters
-        self.levels_total: int = 0
-        self.loot_events_total: int = 0
-        self.deaths_total: int = 0
-        self.pets_total: int = 0
-        self.quests_total: int = 0
-        self.combat_tasks_total: int = 0
-        self.diaries_total: int = 0
-
-        # Last event
+        # Last event (any type)
         self.last_event_type: str | None = None
         self.last_event_summary: str | None = None
         self.last_event_data: dict[str, Any] = {}
         self.last_update: str | None = None
 
-    def _counter_attr(self, event_type: str) -> str | None:
-        """Return the counter attribute name for a given event type."""
-        mapping = {
-            "LEVEL": "levels_total",
-            "LOOT": "loot_events_total",
-            "DEATH": "deaths_total",
-            "PET": "pets_total",
-            "QUEST": "quests_total",
-            "COMBAT_ACHIEVEMENT": "combat_tasks_total",
-            "ACHIEVEMENT_DIARY": "diaries_total",
-        }
-        return mapping.get(event_type)
+        # Per-type last event: type → {summary, data, last_update}
+        self.last_typed_events: dict[str, dict[str, Any]] = {}
+
+        # Detail sensors: key → {value, attributes, last_update}
+        # Only LEVEL events produce detail sensors (per-skill + combat level)
+        self.detail_sensors: dict[str, dict[str, Any]] = {}
+
+    def _update_detail_sensors(
+        self, event_type: str, data: dict[str, Any]
+    ) -> None:
+        """Extract detail sensor entries from parsed event data.
+
+        Only LEVEL events produce detail sensors (individual skills and
+        combat level).  All other event types use per-type last-event
+        sensors instead.
+        """
+        if event_type != "LEVEL":
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Update all skills from the allSkills snapshot (full refresh)
+        for skill, level in data.get("allSkills", {}).items():
+            self.detail_sensors[skill] = {
+                "value": level,
+                "attributes": {"skill": skill},
+                "last_update": now,
+            }
+
+        # Overlay levelled skills (may have the same values, but ensures
+        # freshly-levelled skills are always present even without allSkills)
+        for skill, level in data.get("levelledSkills", {}).items():
+            self.detail_sensors[skill] = {
+                "value": level,
+                "attributes": {"skill": skill},
+                "last_update": now,
+            }
+
+        # Store combat level
+        if "combatLevel" in data:
+            self.detail_sensors["Combat Level"] = {
+                "value": data["combatLevel"],
+                "attributes": {
+                    "increased": data.get("combatLevelIncreased", False),
+                },
+                "last_update": now,
+            }
 
     def record_event(
         self,
@@ -54,18 +91,26 @@ class AccountState:
         data: dict[str, Any],
         player_name: str | None = None,
     ) -> None:
-        """Record a parsed event, incrementing the right counter."""
-        attr = self._counter_attr(event_type)
-        if attr:
-            setattr(self, attr, getattr(self, attr) + 1)
-
+        """Record a parsed event and update detail sensors."""
         if player_name:
             self.player_name = player_name
+
+        now = datetime.now(timezone.utc).isoformat()
 
         self.last_event_type = event_type
         self.last_event_summary = summary
         self.last_event_data = data
-        self.last_update = datetime.now(timezone.utc).isoformat()
+        self.last_update = now
+
+        # Update per-type last event
+        if event_type in self.TYPED_EVENT_TYPES:
+            self.last_typed_events[event_type] = {
+                "summary": summary,
+                "data": data,
+                "last_update": now,
+            }
+
+        self._update_detail_sensors(event_type, data)
 
 
 class AccountStore:

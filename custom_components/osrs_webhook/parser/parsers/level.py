@@ -24,6 +24,10 @@ def parse(extra: dict[str, Any], player_name: str) -> dict[str, Any]:
         "levelledSkills": levelled,
     }
 
+    all_skills = extra.get("allSkills", {})
+    if all_skills:
+        data["allSkills"] = all_skills
+
     if combat_level:
         data["combatLevel"] = combat_level.get("value")
         data["combatLevelIncreased"] = combat_level.get("increased", False)

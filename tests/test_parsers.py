@@ -40,6 +40,7 @@ class TestDispatcher:
         expected = {
             "LEVEL", "LOOT", "DEATH", "PET",
             "QUEST", "COMBAT_ACHIEVEMENT", "ACHIEVEMENT_DIARY",
+            "COLLECTION",
         }
         assert SUPPORTED_TYPES == expected
 
@@ -328,3 +329,59 @@ class TestAchievementDiaryParser:
         result = dispatch("ACHIEVEMENT_DIARY", {"area": "Lumbridge", "difficulty": "EASY"}, "Player")
         assert result is not None
         assert "total" not in result["data"]
+
+
+# ── COLLECTION parser ────────────────────────────────────────────────
+
+
+class TestCollectionParser:
+    def test_basic_collection(self):
+        extra: dict[str, Any] = {
+            "itemName": "Zamorak chaps",
+            "itemId": 10372,
+            "price": 500812,
+            "completedEntries": 420,
+            "totalEntries": 1443,
+            "currentRank": "IRON",
+            "rankProgress": 120,
+            "logsNeededForNextRank": 80,
+            "nextRank": "STEEL",
+            "justCompletedRank": "BRONZE",
+            "dropperName": "Clue Scroll (Hard)",
+            "dropperType": "EVENT",
+            "dropperKillCount": 1500,
+        }
+        result = dispatch("COLLECTION", extra, "Player")
+        assert result is not None
+        assert "Zamorak chaps" in result["summary"]
+        assert "collection log" in result["summary"]
+        assert result["data"]["itemName"] == "Zamorak chaps"
+        assert result["data"]["itemId"] == 10372
+        assert result["data"]["price"] == 500812
+        assert result["data"]["completedEntries"] == 420
+        assert result["data"]["totalEntries"] == 1443
+        assert result["data"]["currentRank"] == "IRON"
+        assert result["data"]["dropperName"] == "Clue Scroll (Hard)"
+        assert result["data"]["dropperType"] == "EVENT"
+        assert result["data"]["dropperKillCount"] == 1500
+
+    def test_collection_without_dropper(self):
+        extra: dict[str, Any] = {
+            "itemName": "Dragon pickaxe",
+            "itemId": 11920,
+            "price": 5000000,
+            "completedEntries": 100,
+            "totalEntries": 1443,
+        }
+        result = dispatch("COLLECTION", extra, "Player")
+        assert result is not None
+        assert result["data"]["itemName"] == "Dragon pickaxe"
+        assert "dropperName" not in result["data"]
+        assert "dropperType" not in result["data"]
+        assert "dropperKillCount" not in result["data"]
+
+    def test_minimal_collection(self):
+        result = dispatch("COLLECTION", {}, "Player")
+        assert result is not None
+        assert result["data"]["itemName"] == "Unknown"
+        assert "collection log" in result["summary"]

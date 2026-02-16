@@ -108,7 +108,7 @@ class TestWebhookIntegration:
 
     @pytest.mark.asyncio
     async def test_level_updates_account_store(self, mock_hass):
-        """LEVEL event increments level counter for correct account."""
+        """LEVEL event updates account state for correct account."""
         hass, store = mock_hass
         request = self._make_json_request(LEVEL_PAYLOAD)
         result = await _handle_webhook(hass, "wh-id", request)
@@ -117,13 +117,12 @@ class TestWebhookIntegration:
         body = json.loads(result.body)
         assert body == {"ok": True}
         acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.levels_total == 1
         assert acct.last_event_type == "LEVEL"
         assert "Attack" in acct.last_event_summary
 
     @pytest.mark.asyncio
     async def test_multi_account_separate_state(self, mock_hass):
-        """Two different accounts get separate counters."""
+        """Two different accounts get separate state."""
         hass, store = mock_hass
 
         await _handle_webhook(hass, "wh-id", self._make_json_request(LEVEL_PAYLOAD))
@@ -132,22 +131,18 @@ class TestWebhookIntegration:
         acct_a = store.get_or_create("hashAAA", "PlayerOne")
         acct_b = store.get_or_create("hashBBB", "PlayerTwo")
 
-        assert acct_a.levels_total == 1
-        assert acct_a.deaths_total == 0
-        assert acct_b.levels_total == 0
-        assert acct_b.deaths_total == 1
+        assert acct_a.last_event_type == "LEVEL"
+        assert acct_b.last_event_type == "DEATH"
 
     @pytest.mark.asyncio
     async def test_same_account_multiple_events(self, mock_hass):
-        """Same account receives multiple events, counters accumulate."""
+        """Same account receives multiple events, last event updates."""
         hass, store = mock_hass
 
         await _handle_webhook(hass, "wh-id", self._make_json_request(LEVEL_PAYLOAD))
         await _handle_webhook(hass, "wh-id", self._make_json_request(QUEST_PAYLOAD))
 
         acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.levels_total == 1
-        assert acct.quests_total == 1
         assert acct.last_event_type == "QUEST"
 
     @pytest.mark.asyncio
@@ -195,4 +190,4 @@ class TestWebhookIntegration:
         result = await _handle_webhook(hass, "wh-id", request)
         assert result.status == 200
         acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.levels_total == 1
+        assert acct.last_event_type == "LEVEL"

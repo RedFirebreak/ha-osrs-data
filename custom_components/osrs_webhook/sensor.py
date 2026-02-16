@@ -17,19 +17,19 @@ from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_U
 
 _LOGGER = logging.getLogger(__name__)
 
-# Counter sensor definitions: (suffix, attribute name, friendly label)
-_COUNTER_SENSORS: list[tuple[str, str, str]] = [
-    ("levels_total", "levels_total", "Levels Total"),
-    ("loot_events_total", "loot_events_total", "Loot Events Total"),
-    ("deaths_total", "deaths_total", "Deaths Total"),
-    ("pets_total", "pets_total", "Pets Total"),
-    ("quests_total", "quests_total", "Quests Total"),
-    ("combat_tasks_total", "combat_tasks_total", "Combat Tasks Total"),
-    ("diaries_total", "diaries_total", "Diaries Total"),
-]
-
 
 _MAX_SLUG_LENGTH = 48
+
+# Per-type last event sensors: (event_type, suffix, friendly label)
+_TYPED_LAST_EVENT_SENSORS: list[tuple[str, str, str]] = [
+    ("LOOT", "last_loot", "Last Loot"),
+    ("DEATH", "last_death", "Last Death"),
+    ("PET", "last_pet", "Last Pet"),
+    ("QUEST", "last_quest", "Last Quest"),
+    ("COMBAT_ACHIEVEMENT", "last_combat_achievement", "Last Combat Achievement"),
+    ("ACHIEVEMENT_DIARY", "last_achievement_diary", "Last Achievement Diary"),
+    ("COLLECTION", "last_collection_log", "Last Collection Log"),
+]
 
 
 def _slugify_account(account_hash: str) -> str:
@@ -43,18 +43,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up OSRS Webhook sensors from a config entry."""
-    # Keep the original status sensor for backward compatibility
     async_add_entities([OsrsWebhookStatusSensor(entry)])
 
     known_accounts: set[str] = set()
+    known_detail_keys: dict[str, set[str]] = {}
 
     @callback
     def _handle_account_update(account_hash: str) -> None:
         """Create entities for a new account, or update existing ones."""
-        if account_hash in known_accounts:
-            return
-        known_accounts.add(account_hash)
-
         store = hass.data[DOMAIN][entry.entry_id][DATA_ACCOUNT_STORE]
         state = store.get_by_hash(account_hash)
         if state is None:
@@ -63,13 +59,30 @@ async def async_setup_entry(
         slug = _slugify_account(account_hash)
         new_entities: list[SensorEntity] = []
 
-        for suffix, attr, label in _COUNTER_SENSORS:
-            new_entities.append(
-                OsrsAccountCounterSensor(entry, state, slug, suffix, attr, label)
-            )
+        if account_hash not in known_accounts:
+            known_accounts.add(account_hash)
+            known_detail_keys[account_hash] = set()
 
-        new_entities.append(OsrsAccountLastEventSensor(entry, state, slug))
-        async_add_entities(new_entities)
+            new_entities.append(OsrsAccountLastEventSensor(entry, state, slug))
+
+            # Create per-type last event sensors
+            for event_type, suffix, label in _TYPED_LAST_EVENT_SENSORS:
+                new_entities.append(
+                    OsrsAccountTypedLastEventSensor(
+                        entry, state, slug, event_type, suffix, label
+                    )
+                )
+
+        # Create detail sensors for any new keys (only LEVEL skills)
+        for key in state.detail_sensors:
+            if key not in known_detail_keys[account_hash]:
+                known_detail_keys[account_hash].add(key)
+                new_entities.append(
+                    OsrsAccountDetailSensor(entry, state, slug, key)
+                )
+
+        if new_entities:
+            async_add_entities(new_entities)
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_ACCOUNT_UPDATED, _handle_account_update)
@@ -123,50 +136,6 @@ def _account_device_info(entry: ConfigEntry, state: AccountState) -> dict[str, A
     }
 
 
-# ── Counter sensors ─────────────────────────────────────────────────
-
-
-class OsrsAccountCounterSensor(SensorEntity):
-    """Numeric counter sensor for a specific event type per account."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        entry: ConfigEntry,
-        state: AccountState,
-        slug: str,
-        suffix: str,
-        attr: str,
-        label: str,
-    ) -> None:
-        self._entry = entry
-        self._state = state
-        self._attr = attr
-        self._attr_unique_id = f"{state.account_hash}_{suffix}"
-        self._attr_name = label
-
-    @property
-    def native_value(self) -> int:
-        return getattr(self._state, self._attr, 0)
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
-
-    @callback
-    def _handle_update(self, account_hash: str) -> None:
-        if account_hash == self._state.account_hash:
-            self.async_write_ha_state()
-
-    async def async_added_to_hass(self) -> None:
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
-            )
-        )
-
-
 # ── Last-event sensor ───────────────────────────────────────────────
 
 
@@ -199,6 +168,136 @@ class OsrsAccountLastEventSensor(SensorEntity):
             attrs.update(self._state.last_event_data)
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Per-type last event sensors ─────────────────────────────────────
+
+
+class OsrsAccountTypedLastEventSensor(SensorEntity):
+    """Sensor that tracks the latest event of a specific type.
+
+    Each supported event type (LOOT, DEATH, PET, QUEST, etc.) gets its
+    own sensor whose state is the summary and attributes hold all the
+    event data.
+    """
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+        event_type: str,
+        suffix: str,
+        label: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._event_type = event_type
+        self._attr_unique_id = f"{state.account_hash}_{suffix}"
+        self._attr_name = label
+
+    @property
+    def native_value(self) -> str | None:
+        typed = self._state.last_typed_events.get(self._event_type)
+        if typed is None:
+            return None
+        return typed.get("summary")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        typed = self._state.last_typed_events.get(self._event_type)
+        if typed is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        if typed.get("data"):
+            attrs.update(typed["data"])
+        if typed.get("last_update"):
+            attrs["last_update"] = typed["last_update"]
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Detail sensors ──────────────────────────────────────────────────
+
+
+_MAX_DETAIL_SLUG_LENGTH = 64
+
+
+def _slugify_detail_key(key: str) -> str:
+    """Create an entity-safe slug from a detail sensor key."""
+    return re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")[:_MAX_DETAIL_SLUG_LENGTH]
+
+
+class OsrsAccountDetailSensor(SensorEntity):
+    """Dynamic sensor for a specific event detail (skill level, loot source, etc.)."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+        detail_key: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._detail_key = detail_key
+        detail_slug = _slugify_detail_key(detail_key)
+        self._attr_unique_id = f"{state.account_hash}_detail_{detail_slug}"
+        self._attr_name = detail_key
+
+    @property
+    def native_value(self):
+        detail = self._state.detail_sensors.get(self._detail_key)
+        if detail is None:
+            return None
+        return detail.get("value")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        detail = self._state.detail_sensors.get(self._detail_key)
+        if detail is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        if detail.get("attributes"):
+            attrs.update(detail["attributes"])
+        if detail.get("last_update"):
+            attrs["last_update"] = detail["last_update"]
         return attrs
 
     @property
