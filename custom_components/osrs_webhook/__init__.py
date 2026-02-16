@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .account_store import AccountStore
-from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, SIGNAL_ACCOUNT_UPDATED
+from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, DATA_STORE, SIGNAL_ACCOUNT_UPDATED
 from .dedupe import DedupeCache
 from .history import HistoryStore
 from .storage import get_store
@@ -45,6 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
         DATA_DEDUPE_CACHE: DedupeCache(),
+        DATA_STORE: store,
     }
 
     async_register_webhook(hass, entry)
@@ -67,16 +68,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
-        # Persist history and account state on unload
+        # Immediate final flush of history and account state to disk
         if entry_data and isinstance(entry_data, dict):
-            save_data: dict = {}
-            history_store = entry_data.get(DATA_HISTORY_STORE)
-            if history_store is not None:
-                save_data["history"] = history_store.to_dict()
-            acct_store = entry_data.get(DATA_ACCOUNT_STORE)
-            if acct_store is not None:
-                save_data["accounts"] = acct_store.to_dict()
-            if save_data:
-                store = get_store(hass)
-                await store.async_save(save_data)
+            store = entry_data.get(DATA_STORE)
+            if store is not None:
+                from .webhook import _build_save_payload
+                await store.async_save(_build_save_payload(entry_data))
     return unload_ok

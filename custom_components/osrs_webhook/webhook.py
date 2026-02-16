@@ -12,10 +12,33 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.webhook import async_register
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, SIGNAL_ACCOUNT_UPDATED
+from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, DATA_STORE, SIGNAL_ACCOUNT_UPDATED
 from .parser.dispatcher import dispatch as dispatch_parser
 
 _LOGGER = logging.getLogger(__name__)
+
+# Delay (in seconds) before writing state to disk after a change.
+_SAVE_DELAY = 5
+
+
+def _build_save_payload(entry_data: dict[str, Any]) -> dict[str, Any]:
+    """Build the storage payload from current entry data."""
+    save_data: dict[str, Any] = {}
+    history_store = entry_data.get(DATA_HISTORY_STORE)
+    if history_store is not None:
+        save_data["history"] = history_store.to_dict()
+    acct_store = entry_data.get(DATA_ACCOUNT_STORE)
+    if acct_store is not None:
+        save_data["accounts"] = acct_store.to_dict()
+    return save_data
+
+
+def _schedule_save(entry_data: dict[str, Any]) -> None:
+    """Schedule a deferred write of history + account data to disk."""
+    store = entry_data.get(DATA_STORE)
+    if store is None:
+        return
+    store.async_delay_save(lambda: _build_save_payload(entry_data), _SAVE_DELAY)
 
 
 def _build_normalized_event(
@@ -147,6 +170,9 @@ async def _handle_webhook(
                 async_dispatcher_send(
                     hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
                 )
+
+                # Schedule deferred save to persist state to disk
+                _schedule_save(entry_data)
 
         # Fire event after dedupe so duplicate webhooks don't trigger automations
         hass.bus.async_fire(EVENT_TYPE, event_data)
