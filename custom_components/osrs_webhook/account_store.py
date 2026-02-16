@@ -112,6 +112,29 @@ class AccountState:
 
         self._update_detail_sensors(event_type, data)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the account state to a dict for persistence."""
+        return {
+            "account_hash": self.account_hash,
+            "player_name": self.player_name,
+            "last_event_type": self.last_event_type,
+            "last_event_summary": self.last_event_summary,
+            "last_event_data": self.last_event_data,
+            "last_update": self.last_update,
+            "last_typed_events": self.last_typed_events,
+            "detail_sensors": self.detail_sensors,
+        }
+
+    def load_dict(self, data: dict[str, Any]) -> None:
+        """Restore the account state from a persisted dict."""
+        self.player_name = data.get("player_name", self.player_name)
+        self.last_event_type = data.get("last_event_type")
+        self.last_event_summary = data.get("last_event_summary")
+        self.last_event_data = data.get("last_event_data", {})
+        self.last_update = data.get("last_update")
+        self.last_typed_events = data.get("last_typed_events", {})
+        self.detail_sensors = data.get("detail_sensors", {})
+
 
 class AccountStore:
     """In-memory store keyed by dinkAccountHash (fallback: playerName)."""
@@ -164,3 +187,15 @@ class AccountStore:
                 seen.add(id(state))
                 result.append(state)
         return result
+
+    def to_dict(self) -> list[dict[str, Any]]:
+        """Serialize all account states for persistence."""
+        return [acct.to_dict() for acct in self.accounts]
+
+    def load_dict(self, data: list[dict[str, Any]]) -> None:
+        """Restore account states from persisted data."""
+        for acct_data in data:
+            account_hash = acct_data.get("account_hash", "")
+            player_name = acct_data.get("player_name", "Unknown")
+            state = self.get_or_create(account_hash, player_name)
+            state.load_dict(acct_data)
