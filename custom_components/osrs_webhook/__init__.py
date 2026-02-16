@@ -4,9 +4,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .account_store import AccountStore
-from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE
+from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, DATA_STORE, SIGNAL_ACCOUNT_UPDATED
 from .dedupe import DedupeCache
 from .history import HistoryStore
 from .storage import get_store
@@ -31,17 +32,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     history_store = HistoryStore()
+    account_store = AccountStore()
 
-    # Restore persisted history
+    # Restore persisted data
     store = get_store(hass)
     stored = await store.async_load()
     if stored and isinstance(stored, dict):
         history_store.load_dict(stored.get("history", {}))
+        account_store.load_dict(stored.get("accounts") or [])
 
     hass.data[DOMAIN][entry.entry_id] = {
-        DATA_ACCOUNT_STORE: AccountStore(),
+        DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
         DATA_DEDUPE_CACHE: DedupeCache(),
+        DATA_STORE: store,
     }
 
     async_register_webhook(hass, entry)
@@ -50,6 +54,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("OSRS Webhook registered at /api/webhook/%s", webhook_id)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Fire dispatcher signals for restored accounts so sensor entities
+    # are re-created with their persisted values.
+    for acct in account_store.accounts:
+        async_dispatcher_send(hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash)
+
     return True
 
 
@@ -58,10 +68,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
-        # Persist history on unload
+        # Immediate final flush of history and account state to disk
         if entry_data and isinstance(entry_data, dict):
-            history_store = entry_data.get(DATA_HISTORY_STORE)
-            if history_store is not None:
-                store = get_store(hass)
-                await store.async_save({"history": history_store.to_dict()})
+            store = entry_data.get(DATA_STORE)
+            if store is not None:
+                from .webhook import _build_save_payload
+                await store.async_save(_build_save_payload(entry_data))
     return unload_ok

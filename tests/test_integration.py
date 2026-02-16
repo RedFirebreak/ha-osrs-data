@@ -32,6 +32,7 @@ if _root not in sys.path:
 from custom_components.osrs_webhook.account_store import AccountStore  # noqa: E402
 from custom_components.osrs_webhook.const import (  # noqa: E402
     DATA_ACCOUNT_STORE,
+    DATA_STORE,
     DOMAIN,
     SIGNAL_ACCOUNT_UPDATED,
 )
@@ -90,15 +91,17 @@ class TestWebhookIntegration:
         hass.bus.async_fire = MagicMock()
 
         store = AccountStore()
+        mock_storage = MagicMock()
         entry_id = "test_entry"
         hass.data = {
             DOMAIN: {
                 entry_id: {
                     DATA_ACCOUNT_STORE: store,
+                    DATA_STORE: mock_storage,
                 }
             }
         }
-        return hass, store
+        return hass, store, mock_storage
 
     def _make_json_request(self, payload: dict[str, Any]):
         request = MagicMock()
@@ -109,7 +112,7 @@ class TestWebhookIntegration:
     @pytest.mark.asyncio
     async def test_level_updates_account_store(self, mock_hass):
         """LEVEL event updates account state for correct account."""
-        hass, store = mock_hass
+        hass, store, _ = mock_hass
         request = self._make_json_request(LEVEL_PAYLOAD)
         result = await _handle_webhook(hass, "wh-id", request)
 
@@ -123,7 +126,7 @@ class TestWebhookIntegration:
     @pytest.mark.asyncio
     async def test_multi_account_separate_state(self, mock_hass):
         """Two different accounts get separate state."""
-        hass, store = mock_hass
+        hass, store, _ = mock_hass
 
         await _handle_webhook(hass, "wh-id", self._make_json_request(LEVEL_PAYLOAD))
         await _handle_webhook(hass, "wh-id", self._make_json_request(DEATH_PAYLOAD))
@@ -137,7 +140,7 @@ class TestWebhookIntegration:
     @pytest.mark.asyncio
     async def test_same_account_multiple_events(self, mock_hass):
         """Same account receives multiple events, last event updates."""
-        hass, store = mock_hass
+        hass, store, _ = mock_hass
 
         await _handle_webhook(hass, "wh-id", self._make_json_request(LEVEL_PAYLOAD))
         await _handle_webhook(hass, "wh-id", self._make_json_request(QUEST_PAYLOAD))
@@ -148,7 +151,7 @@ class TestWebhookIntegration:
     @pytest.mark.asyncio
     async def test_dispatcher_signal_fired(self, mock_hass):
         """Verify dispatcher signal is sent for account updates."""
-        hass, store = mock_hass
+        hass, store, _ = mock_hass
         request = self._make_json_request(LEVEL_PAYLOAD)
 
         # Patch dispatcher
@@ -163,7 +166,7 @@ class TestWebhookIntegration:
     @pytest.mark.asyncio
     async def test_unsupported_type_no_store_update(self, mock_hass):
         """Unsupported event types don't update the store."""
-        hass, store = mock_hass
+        hass, store, _ = mock_hass
         payload = {
             "type": "LOGIN",
             "playerName": "Player",
@@ -182,7 +185,7 @@ class TestWebhookIntegration:
     @pytest.mark.asyncio
     async def test_no_embeds_dependency(self, mock_hass):
         """Parsing does not depend on embeds being present."""
-        hass, store = mock_hass
+        hass, store, _ = mock_hass
         payload = dict(LEVEL_PAYLOAD)
         payload.pop("embeds", None)  # Remove embeds if present to test without them
         request = self._make_json_request(payload)
@@ -191,3 +194,18 @@ class TestWebhookIntegration:
         assert result.status == 200
         acct = store.get_or_create("hashAAA", "PlayerOne")
         assert acct.last_event_type == "LEVEL"
+
+    @pytest.mark.asyncio
+    async def test_webhook_schedules_save(self, mock_hass):
+        """Webhook handler schedules a deferred save to persist state."""
+        hass, store, mock_storage = mock_hass
+        request = self._make_json_request(LEVEL_PAYLOAD)
+        await _handle_webhook(hass, "wh-id", request)
+
+        mock_storage.async_delay_save.assert_called_once()
+        # Verify the callback produces a payload with accounts
+        save_callback = mock_storage.async_delay_save.call_args[0][0]
+        payload = save_callback()
+        assert "accounts" in payload
+        assert len(payload["accounts"]) == 1
+        assert payload["accounts"][0]["player_name"] == "PlayerOne"

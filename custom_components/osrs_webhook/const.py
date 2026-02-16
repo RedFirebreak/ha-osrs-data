@@ -13,6 +13,7 @@ STORAGE_KEY = f"{DOMAIN}_store"
 DATA_ACCOUNT_STORE = "account_store"
 DATA_HISTORY_STORE = "history_store"
 DATA_DEDUPE_CACHE = "dedupe_cache"
+DATA_STORE = "store"
 
 # Dispatcher signal for account updates
 SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
