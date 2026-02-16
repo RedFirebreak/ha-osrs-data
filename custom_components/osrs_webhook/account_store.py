@@ -13,20 +13,11 @@ def _normalize_player_name(name: str) -> str:
 
 
 class AccountState:
-    """Per-account counters and last-event details."""
+    """Per-account event details and detail sensors."""
 
     def __init__(self, account_hash: str, player_name: str) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
-
-        # Counters
-        self.levels_total: int = 0
-        self.loot_events_total: int = 0
-        self.deaths_total: int = 0
-        self.pets_total: int = 0
-        self.quests_total: int = 0
-        self.combat_tasks_total: int = 0
-        self.diaries_total: int = 0
 
         # Last event
         self.last_event_type: str | None = None
@@ -37,23 +28,15 @@ class AccountState:
         # Detail sensors: key → {value, attributes, last_update}
         self.detail_sensors: dict[str, dict[str, Any]] = {}
 
-    def _counter_attr(self, event_type: str) -> str | None:
-        """Return the counter attribute name for a given event type."""
-        mapping = {
-            "LEVEL": "levels_total",
-            "LOOT": "loot_events_total",
-            "DEATH": "deaths_total",
-            "PET": "pets_total",
-            "QUEST": "quests_total",
-            "COMBAT_ACHIEVEMENT": "combat_tasks_total",
-            "ACHIEVEMENT_DIARY": "diaries_total",
-        }
-        return mapping.get(event_type)
-
     def _update_detail_sensors(
         self, event_type: str, data: dict[str, Any]
     ) -> None:
-        """Extract detail sensor entries from parsed event data."""
+        """Extract detail sensor entries from parsed event data.
+
+        Event types DEATH and PET only update Last Event (no dedicated
+        detail sensors) because they produce many unique keys that are
+        better consumed as transient events.
+        """
         now = datetime.now(timezone.utc).isoformat()
 
         if event_type == "LEVEL":
@@ -86,32 +69,6 @@ class AccountState:
                     "totalValue": data.get("totalValue", 0),
                     "category": data.get("category"),
                     "killCount": data.get("killCount"),
-                },
-                "last_update": now,
-            }
-
-        elif event_type == "DEATH":
-            killer = data.get("killerName", "Unknown")
-            key = f"Death - {killer}"
-            self.detail_sensors[key] = {
-                "value": data.get("valueLost", 0),
-                "attributes": {
-                    "killerName": killer,
-                    "valueLost": data.get("valueLost", 0),
-                    "isPvp": data.get("isPvp", False),
-                },
-                "last_update": now,
-            }
-
-        elif event_type == "PET":
-            pet_name = data.get("petName") or "Unknown"
-            key = f"Pet - {pet_name}"
-            self.detail_sensors[key] = {
-                "value": pet_name,
-                "attributes": {
-                    "petName": pet_name,
-                    "duplicate": data.get("duplicate", False),
-                    "milestone": data.get("milestone"),
                 },
                 "last_update": now,
             }
@@ -171,11 +128,7 @@ class AccountState:
         data: dict[str, Any],
         player_name: str | None = None,
     ) -> None:
-        """Record a parsed event, incrementing the right counter."""
-        attr = self._counter_attr(event_type)
-        if attr:
-            setattr(self, attr, getattr(self, attr) + 1)
-
+        """Record a parsed event and update detail sensors."""
         if player_name:
             self.player_name = player_name
 

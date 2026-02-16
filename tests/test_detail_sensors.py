@@ -120,52 +120,33 @@ class TestDetailSensorsLoot:
 
 
 class TestDetailSensorsDeath:
-    """Tests for DEATH event detail sensor population."""
+    """Tests for DEATH event — updates Last Event only, no detail sensor."""
 
-    def test_death_creates_killer_sensor(self):
+    def test_death_no_detail_sensor(self):
         state = AccountState("hash1", "Player")
         state.record_event("DEATH", "Died", {
             "killerName": "Vorkath",
             "valueLost": 5000,
             "isPvp": False,
         })
-        key = "Death - Vorkath"
-        assert key in state.detail_sensors
-        assert state.detail_sensors[key]["value"] == 5000
-        assert state.detail_sensors[key]["attributes"]["killerName"] == "Vorkath"
-        assert state.detail_sensors[key]["attributes"]["isPvp"] is False
-
-    def test_death_unknown_killer(self):
-        state = AccountState("hash1", "Player")
-        state.record_event("DEATH", "Died", {
-            "valueLost": 300,
-            "isPvp": False,
-        })
-        assert "Death - Unknown" in state.detail_sensors
+        assert len(state.detail_sensors) == 0
+        assert state.last_event_type == "DEATH"
+        assert state.last_event_summary == "Died"
 
 
 class TestDetailSensorsPet:
-    """Tests for PET event detail sensor population."""
+    """Tests for PET event — updates Last Event only, no detail sensor."""
 
-    def test_pet_creates_sensor(self):
+    def test_pet_no_detail_sensor(self):
         state = AccountState("hash1", "Player")
         state.record_event("PET", "Got pet", {
             "petName": "Ikkle hydra",
             "duplicate": False,
             "milestone": "5,000 killcount",
         })
-        key = "Pet - Ikkle hydra"
-        assert key in state.detail_sensors
-        assert state.detail_sensors[key]["value"] == "Ikkle hydra"
-        assert state.detail_sensors[key]["attributes"]["duplicate"] is False
-        assert state.detail_sensors[key]["attributes"]["milestone"] == "5,000 killcount"
-
-    def test_pet_no_name(self):
-        state = AccountState("hash1", "Player")
-        state.record_event("PET", "Got pet", {
-            "duplicate": False,
-        })
-        assert "Pet - Unknown" in state.detail_sensors
+        assert len(state.detail_sensors) == 0
+        assert state.last_event_type == "PET"
+        assert state.last_event_summary == "Got pet"
 
 
 class TestDetailSensorsQuest:
