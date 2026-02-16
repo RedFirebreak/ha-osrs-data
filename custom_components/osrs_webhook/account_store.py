@@ -56,14 +56,23 @@ class AccountState:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        # Store each levelled skill as its own sensor
-        for skill, level in data.get("levelledSkills", {}).items():
-            key = skill
-            self.detail_sensors[key] = {
+        # Update all skills from the allSkills snapshot (full refresh)
+        for skill, level in data.get("allSkills", {}).items():
+            self.detail_sensors[skill] = {
                 "value": level,
                 "attributes": {"skill": skill},
                 "last_update": now,
             }
+
+        # Overlay levelled skills (may have the same values, but ensures
+        # freshly-levelled skills are always present even without allSkills)
+        for skill, level in data.get("levelledSkills", {}).items():
+            self.detail_sensors[skill] = {
+                "value": level,
+                "attributes": {"skill": skill},
+                "last_update": now,
+            }
+
         # Store combat level
         if "combatLevel" in data:
             self.detail_sensors["Combat Level"] = {

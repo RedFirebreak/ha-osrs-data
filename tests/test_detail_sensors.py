@@ -91,6 +91,55 @@ class TestDetailSensorsLevel:
         })
         assert len(state.detail_sensors) == 0
 
+    def test_level_allskills_creates_all_skill_sensors(self):
+        """allSkills section should create sensors for every skill."""
+        state = AccountState("hash1", "Player")
+        state.record_event("LEVEL", "Levelled Sailing", {
+            "levelledSkills": {"Sailing": 68},
+            "allSkills": {
+                "Thieving": 71,
+                "Runecraft": 80,
+                "Cooking": 71,
+                "Sailing": 68,
+                "Attack": 94,
+                "Defence": 93,
+            },
+            "combatLevel": 120,
+        })
+        # All skills from allSkills should be present
+        assert state.detail_sensors["Thieving"]["value"] == 71
+        assert state.detail_sensors["Runecraft"]["value"] == 80
+        assert state.detail_sensors["Attack"]["value"] == 94
+        assert state.detail_sensors["Defence"]["value"] == 93
+        # Levelled skill is also present
+        assert state.detail_sensors["Sailing"]["value"] == 68
+        # Combat level
+        assert state.detail_sensors["Combat Level"]["value"] == 120
+        # Total: 6 skills + 1 combat level
+        assert len(state.detail_sensors) == 7
+
+    def test_level_allskills_without_levelled_skills(self):
+        """allSkills alone should populate sensors even without levelledSkills."""
+        state = AccountState("hash1", "Player")
+        state.record_event("LEVEL", "Levelled", {
+            "levelledSkills": {},
+            "allSkills": {"Attack": 50, "Strength": 60},
+        })
+        assert state.detail_sensors["Attack"]["value"] == 50
+        assert state.detail_sensors["Strength"]["value"] == 60
+        assert len(state.detail_sensors) == 2
+
+    def test_level_levelled_overrides_allskills(self):
+        """levelledSkills should overlay allSkills if both present."""
+        state = AccountState("hash1", "Player")
+        state.record_event("LEVEL", "Levelled Attack", {
+            "levelledSkills": {"Attack": 71},
+            "allSkills": {"Attack": 70, "Strength": 60},
+        })
+        # levelledSkills value wins (applied after allSkills)
+        assert state.detail_sensors["Attack"]["value"] == 71
+        assert state.detail_sensors["Strength"]["value"] == 60
+
 
 class TestTypedLastEventSensors:
     """Tests for per-type last event tracking (LOOT, DEATH, PET, QUEST, etc.)."""
