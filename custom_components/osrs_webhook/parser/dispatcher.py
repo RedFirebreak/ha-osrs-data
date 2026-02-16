@@ -7,6 +7,7 @@ from typing import Any
 
 from .parsers import (
     achievement_diary,
+    collection,
     combat_achievement,
     death,
     level,
@@ -25,6 +26,7 @@ _PARSERS: dict[str, Any] = {
     "QUEST": quest,
     "COMBAT_ACHIEVEMENT": combat_achievement,
     "ACHIEVEMENT_DIARY": achievement_diary,
+    "COLLECTION": collection,
 }
 
 SUPPORTED_TYPES: frozenset[str] = frozenset(_PARSERS)

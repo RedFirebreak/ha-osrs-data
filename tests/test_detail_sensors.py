@@ -229,6 +229,24 @@ class TestTypedLastEventSensors:
         assert typed["data"]["difficulty"] == "HARD"
         assert len(state.detail_sensors) == 0
 
+    def test_collection_updates_typed_last_event(self):
+        state = AccountState("hash1", "Player")
+        state.record_event("COLLECTION", "Added Zamorak chaps", {
+            "itemName": "Zamorak chaps",
+            "itemId": 10372,
+            "price": 500812,
+            "completedEntries": 420,
+            "totalEntries": 1443,
+            "dropperName": "Clue Scroll (Hard)",
+        })
+        assert "COLLECTION" in state.last_typed_events
+        typed = state.last_typed_events["COLLECTION"]
+        assert typed["summary"] == "Added Zamorak chaps"
+        assert typed["data"]["itemName"] == "Zamorak chaps"
+        assert typed["data"]["completedEntries"] == 420
+        assert typed["data"]["dropperName"] == "Clue Scroll (Hard)"
+        assert len(state.detail_sensors) == 0
+
     def test_typed_last_event_overwrites_previous(self):
         state = AccountState("hash1", "Player")
         state.record_event("LOOT", "First loot", {"source": "Goblin", "totalValue": 10})

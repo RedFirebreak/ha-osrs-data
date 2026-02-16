@@ -23,6 +23,7 @@ class AccountState:
         "QUEST",
         "COMBAT_ACHIEVEMENT",
         "ACHIEVEMENT_DIARY",
+        "COLLECTION",
     )
 
     def __init__(self, account_hash: str, player_name: str) -> None:

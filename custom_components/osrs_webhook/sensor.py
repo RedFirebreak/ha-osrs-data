@@ -28,6 +28,7 @@ _TYPED_LAST_EVENT_SENSORS: list[tuple[str, str, str]] = [
     ("QUEST", "last_quest", "Last Quest"),
     ("COMBAT_ACHIEVEMENT", "last_combat_achievement", "Last Combat Achievement"),
     ("ACHIEVEMENT_DIARY", "last_achievement_diary", "Last Achievement Diary"),
+    ("COLLECTION", "last_collection_log", "Last Collection Log"),
 ]
 
 
