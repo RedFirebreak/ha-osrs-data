@@ -92,117 +92,110 @@ class TestDetailSensorsLevel:
         assert len(state.detail_sensors) == 0
 
 
-class TestDetailSensorsLoot:
-    """Tests for LOOT event detail sensor population."""
+class TestTypedLastEventSensors:
+    """Tests for per-type last event tracking (LOOT, DEATH, PET, QUEST, etc.)."""
 
-    def test_loot_creates_source_sensor(self):
+    def test_loot_updates_typed_last_event(self):
         state = AccountState("hash1", "Player")
-        state.record_event("LOOT", "Looted", {
+        state.record_event("LOOT", "Looted Chambers of Xeric", {
             "source": "Chambers of Xeric",
             "totalValue": 42069,
             "items": [{"name": "Dragon scimitar", "quantity": 1}],
             "category": "EVENT",
             "killCount": 60,
         })
-        key = "Loot - Chambers of Xeric"
-        assert key in state.detail_sensors
-        assert state.detail_sensors[key]["value"] == 42069
-        assert state.detail_sensors[key]["attributes"]["source"] == "Chambers of Xeric"
-        assert state.detail_sensors[key]["attributes"]["killCount"] == 60
+        assert "LOOT" in state.last_typed_events
+        assert state.last_typed_events["LOOT"]["summary"] == "Looted Chambers of Xeric"
+        assert state.last_typed_events["LOOT"]["data"]["source"] == "Chambers of Xeric"
+        assert state.last_typed_events["LOOT"]["data"]["totalValue"] == 42069
+        assert len(state.detail_sensors) == 0
 
-    def test_loot_unknown_source(self):
+    def test_death_updates_typed_last_event(self):
         state = AccountState("hash1", "Player")
-        state.record_event("LOOT", "Looted", {
-            "totalValue": 100,
-            "items": [],
-        })
-        assert "Loot - Unknown" in state.detail_sensors
-
-
-class TestDetailSensorsDeath:
-    """Tests for DEATH event — updates Last Event only, no detail sensor."""
-
-    def test_death_no_detail_sensor(self):
-        state = AccountState("hash1", "Player")
-        state.record_event("DEATH", "Died", {
+        state.record_event("DEATH", "Died to Vorkath", {
             "killerName": "Vorkath",
             "valueLost": 5000,
             "isPvp": False,
         })
+        assert "DEATH" in state.last_typed_events
+        assert state.last_typed_events["DEATH"]["summary"] == "Died to Vorkath"
+        assert state.last_typed_events["DEATH"]["data"]["killerName"] == "Vorkath"
         assert len(state.detail_sensors) == 0
-        assert state.last_event_type == "DEATH"
-        assert state.last_event_summary == "Died"
 
-
-class TestDetailSensorsPet:
-    """Tests for PET event — updates Last Event only, no detail sensor."""
-
-    def test_pet_no_detail_sensor(self):
+    def test_pet_updates_typed_last_event(self):
         state = AccountState("hash1", "Player")
         state.record_event("PET", "Got pet", {
             "petName": "Ikkle hydra",
             "duplicate": False,
             "milestone": "5,000 killcount",
         })
+        assert "PET" in state.last_typed_events
+        assert state.last_typed_events["PET"]["summary"] == "Got pet"
+        assert state.last_typed_events["PET"]["data"]["petName"] == "Ikkle hydra"
         assert len(state.detail_sensors) == 0
-        assert state.last_event_type == "PET"
-        assert state.last_event_summary == "Got pet"
 
-
-class TestDetailSensorsQuest:
-    """Tests for QUEST event detail sensor population."""
-
-    def test_quest_creates_sensor(self):
+    def test_quest_updates_typed_last_event(self):
         state = AccountState("hash1", "Player")
-        state.record_event("QUEST", "Completed quest", {
+        state.record_event("QUEST", "Completed Dragon Slayer I", {
             "questName": "Dragon Slayer I",
             "completedQuests": 22,
             "totalQuests": 156,
             "questPoints": 44,
             "totalQuestPoints": 293,
         })
-        key = "Quest - Dragon Slayer I"
-        assert key in state.detail_sensors
-        assert state.detail_sensors[key]["value"] == "Dragon Slayer I"
-        assert state.detail_sensors[key]["attributes"]["completedQuests"] == 22
-        assert state.detail_sensors[key]["attributes"]["totalQuestPoints"] == 293
+        assert "QUEST" in state.last_typed_events
+        assert state.last_typed_events["QUEST"]["summary"] == "Completed Dragon Slayer I"
+        assert state.last_typed_events["QUEST"]["data"]["questName"] == "Dragon Slayer I"
+        assert state.last_typed_events["QUEST"]["data"]["questPoints"] == 44
+        assert len(state.detail_sensors) == 0
 
-
-class TestDetailSensorsCombatAchievement:
-    """Tests for COMBAT_ACHIEVEMENT event detail sensor population."""
-
-    def test_combat_achievement_creates_sensor(self):
+    def test_combat_achievement_updates_typed_last_event(self):
         state = AccountState("hash1", "Player")
-        state.record_event("COMBAT_ACHIEVEMENT", "Completed task", {
+        state.record_event("COMBAT_ACHIEVEMENT", "Completed Peach Conjurer", {
             "tier": "GRANDMASTER",
             "task": "Peach Conjurer",
             "taskPoints": 6,
             "totalPoints": 1337,
         })
-        key = "Combat Achievement - Peach Conjurer"
-        assert key in state.detail_sensors
-        assert state.detail_sensors[key]["value"] == "Peach Conjurer"
-        assert state.detail_sensors[key]["attributes"]["tier"] == "GRANDMASTER"
-        assert state.detail_sensors[key]["attributes"]["taskPoints"] == 6
+        assert "COMBAT_ACHIEVEMENT" in state.last_typed_events
+        typed = state.last_typed_events["COMBAT_ACHIEVEMENT"]
+        assert typed["summary"] == "Completed Peach Conjurer"
+        assert typed["data"]["tier"] == "GRANDMASTER"
+        assert typed["data"]["taskPoints"] == 6
+        assert len(state.detail_sensors) == 0
 
-
-class TestDetailSensorsAchievementDiary:
-    """Tests for ACHIEVEMENT_DIARY event detail sensor population."""
-
-    def test_diary_creates_sensor(self):
+    def test_achievement_diary_updates_typed_last_event(self):
         state = AccountState("hash1", "Player")
-        state.record_event("ACHIEVEMENT_DIARY", "Completed diary", {
+        state.record_event("ACHIEVEMENT_DIARY", "Completed Varrock Hard", {
             "area": "Varrock",
             "difficulty": "HARD",
             "total": 15,
             "tasksCompleted": 152,
             "tasksTotal": 492,
         })
-        key = "Achievement Diary - Varrock"
-        assert key in state.detail_sensors
-        assert state.detail_sensors[key]["value"] == "HARD"
-        assert state.detail_sensors[key]["attributes"]["area"] == "Varrock"
-        assert state.detail_sensors[key]["attributes"]["tasksCompleted"] == 152
+        assert "ACHIEVEMENT_DIARY" in state.last_typed_events
+        typed = state.last_typed_events["ACHIEVEMENT_DIARY"]
+        assert typed["summary"] == "Completed Varrock Hard"
+        assert typed["data"]["area"] == "Varrock"
+        assert typed["data"]["difficulty"] == "HARD"
+        assert len(state.detail_sensors) == 0
+
+    def test_typed_last_event_overwrites_previous(self):
+        state = AccountState("hash1", "Player")
+        state.record_event("LOOT", "First loot", {"source": "Goblin", "totalValue": 10})
+        state.record_event("LOOT", "Second loot", {"source": "Zulrah", "totalValue": 9999})
+        assert state.last_typed_events["LOOT"]["summary"] == "Second loot"
+        assert state.last_typed_events["LOOT"]["data"]["source"] == "Zulrah"
+
+    def test_level_does_not_create_typed_last_event(self):
+        state = AccountState("hash1", "Player")
+        state.record_event("LEVEL", "Levelled", {"levelledSkills": {"Attack": 70}})
+        assert "LEVEL" not in state.last_typed_events
+
+    def test_unsupported_type_no_typed_last_event(self):
+        state = AccountState("hash1", "Player")
+        state.record_event("LOGIN", "Logged in", {})
+        assert len(state.last_typed_events) == 0
 
 
 class TestDetailSensorsInitState:
@@ -211,13 +204,15 @@ class TestDetailSensorsInitState:
     def test_initial_detail_sensors_empty(self):
         state = AccountState("hash1", "Player")
         assert state.detail_sensors == {}
+        assert state.last_typed_events == {}
 
     def test_unsupported_event_no_detail_sensors(self):
         state = AccountState("hash1", "Player")
         state.record_event("LOGIN", "Logged in", {})
         assert len(state.detail_sensors) == 0
 
-    def test_multiple_event_types_accumulate(self):
+    def test_level_and_loot_separate_tracking(self):
+        """LEVEL creates detail sensors; LOOT creates typed last event."""
         state = AccountState("hash1", "Player")
         state.record_event("LEVEL", "Levelled", {
             "levelledSkills": {"Attack": 70},
@@ -227,13 +222,9 @@ class TestDetailSensorsInitState:
             "totalValue": 500,
             "items": [],
         })
-        state.record_event("QUEST", "Quest", {
-            "questName": "Cook's Assistant",
-        })
         assert "Attack" in state.detail_sensors
-        assert "Loot - Zulrah" in state.detail_sensors
-        assert "Quest - Cook's Assistant" in state.detail_sensors
-        assert len(state.detail_sensors) == 3
+        assert len(state.detail_sensors) == 1
+        assert "LOOT" in state.last_typed_events
 
 
 class TestSlugifyDetailKey:

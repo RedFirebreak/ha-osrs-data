@@ -20,6 +20,16 @@ _LOGGER = logging.getLogger(__name__)
 
 _MAX_SLUG_LENGTH = 48
 
+# Per-type last event sensors: (event_type, suffix, friendly label)
+_TYPED_LAST_EVENT_SENSORS: list[tuple[str, str, str]] = [
+    ("LOOT", "last_loot", "Last Loot"),
+    ("DEATH", "last_death", "Last Death"),
+    ("PET", "last_pet", "Last Pet"),
+    ("QUEST", "last_quest", "Last Quest"),
+    ("COMBAT_ACHIEVEMENT", "last_combat_achievement", "Last Combat Achievement"),
+    ("ACHIEVEMENT_DIARY", "last_achievement_diary", "Last Achievement Diary"),
+]
+
 
 def _slugify_account(account_hash: str) -> str:
     """Create a short, entity-safe slug from an account identifier."""
@@ -54,7 +64,15 @@ async def async_setup_entry(
 
             new_entities.append(OsrsAccountLastEventSensor(entry, state, slug))
 
-        # Create detail sensors for any new keys
+            # Create per-type last event sensors
+            for event_type, suffix, label in _TYPED_LAST_EVENT_SENSORS:
+                new_entities.append(
+                    OsrsAccountTypedLastEventSensor(
+                        entry, state, slug, event_type, suffix, label
+                    )
+                )
+
+        # Create detail sensors for any new keys (only LEVEL skills)
         for key in state.detail_sensors:
             if key not in known_detail_keys[account_hash]:
                 known_detail_keys[account_hash].add(key)
@@ -149,6 +167,70 @@ class OsrsAccountLastEventSensor(SensorEntity):
             attrs.update(self._state.last_event_data)
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Per-type last event sensors ─────────────────────────────────────
+
+
+class OsrsAccountTypedLastEventSensor(SensorEntity):
+    """Sensor that tracks the latest event of a specific type.
+
+    Each supported event type (LOOT, DEATH, PET, QUEST, etc.) gets its
+    own sensor whose state is the summary and attributes hold all the
+    event data.
+    """
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+        event_type: str,
+        suffix: str,
+        label: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._event_type = event_type
+        self._attr_unique_id = f"{state.account_hash}_{suffix}"
+        self._attr_name = label
+
+    @property
+    def native_value(self) -> str | None:
+        typed = self._state.last_typed_events.get(self._event_type)
+        if typed is None:
+            return None
+        return typed.get("summary")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        typed = self._state.last_typed_events.get(self._event_type)
+        if typed is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        if typed.get("data"):
+            attrs.update(typed["data"])
+        if typed.get("last_update"):
+            attrs["last_update"] = typed["last_update"]
         return attrs
 
     @property

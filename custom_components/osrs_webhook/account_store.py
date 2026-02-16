@@ -15,17 +15,31 @@ def _normalize_player_name(name: str) -> str:
 class AccountState:
     """Per-account event details and detail sensors."""
 
+    # Event types that get their own "Last <Type>" sensor
+    TYPED_EVENT_TYPES: tuple[str, ...] = (
+        "LOOT",
+        "DEATH",
+        "PET",
+        "QUEST",
+        "COMBAT_ACHIEVEMENT",
+        "ACHIEVEMENT_DIARY",
+    )
+
     def __init__(self, account_hash: str, player_name: str) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
 
-        # Last event
+        # Last event (any type)
         self.last_event_type: str | None = None
         self.last_event_summary: str | None = None
         self.last_event_data: dict[str, Any] = {}
         self.last_update: str | None = None
 
+        # Per-type last event: type → {summary, data, last_update}
+        self.last_typed_events: dict[str, dict[str, Any]] = {}
+
         # Detail sensors: key → {value, attributes, last_update}
+        # Only LEVEL events produce detail sensors (per-skill + combat level)
         self.detail_sensors: dict[str, dict[str, Any]] = {}
 
     def _update_detail_sensors(
@@ -33,90 +47,29 @@ class AccountState:
     ) -> None:
         """Extract detail sensor entries from parsed event data.
 
-        Event types DEATH and PET only update Last Event (no dedicated
-        detail sensors) because they produce many unique keys that are
-        better consumed as transient events.
+        Only LEVEL events produce detail sensors (individual skills and
+        combat level).  All other event types use per-type last-event
+        sensors instead.
         """
+        if event_type != "LEVEL":
+            return
+
         now = datetime.now(timezone.utc).isoformat()
 
-        if event_type == "LEVEL":
-            # Store each levelled skill as its own sensor
-            for skill, level in data.get("levelledSkills", {}).items():
-                key = skill
-                self.detail_sensors[key] = {
-                    "value": level,
-                    "attributes": {"skill": skill},
-                    "last_update": now,
-                }
-            # Store combat level
-            if "combatLevel" in data:
-                self.detail_sensors["Combat Level"] = {
-                    "value": data["combatLevel"],
-                    "attributes": {
-                        "increased": data.get("combatLevelIncreased", False),
-                    },
-                    "last_update": now,
-                }
-
-        elif event_type == "LOOT":
-            source = data.get("source", "Unknown")
-            key = f"Loot - {source}"
+        # Store each levelled skill as its own sensor
+        for skill, level in data.get("levelledSkills", {}).items():
+            key = skill
             self.detail_sensors[key] = {
-                "value": data.get("totalValue", 0),
-                "attributes": {
-                    "source": source,
-                    "items": data.get("items", []),
-                    "totalValue": data.get("totalValue", 0),
-                    "category": data.get("category"),
-                    "killCount": data.get("killCount"),
-                },
+                "value": level,
+                "attributes": {"skill": skill},
                 "last_update": now,
             }
-
-        elif event_type == "QUEST":
-            quest_name = data.get("questName", "Unknown")
-            key = f"Quest - {quest_name}"
-            self.detail_sensors[key] = {
-                "value": quest_name,
+        # Store combat level
+        if "combatLevel" in data:
+            self.detail_sensors["Combat Level"] = {
+                "value": data["combatLevel"],
                 "attributes": {
-                    "questName": quest_name,
-                    "completedQuests": data.get("completedQuests"),
-                    "totalQuests": data.get("totalQuests"),
-                    "questPoints": data.get("questPoints"),
-                    "totalQuestPoints": data.get("totalQuestPoints"),
-                },
-                "last_update": now,
-            }
-
-        elif event_type == "COMBAT_ACHIEVEMENT":
-            task = data.get("task", "Unknown")
-            key = f"Combat Achievement - {task}"
-            self.detail_sensors[key] = {
-                "value": task,
-                "attributes": {
-                    "tier": data.get("tier"),
-                    "task": task,
-                    "taskPoints": data.get("taskPoints"),
-                    "totalPoints": data.get("totalPoints"),
-                    "currentTier": data.get("currentTier"),
-                    "justCompletedTier": data.get("justCompletedTier"),
-                },
-                "last_update": now,
-            }
-
-        elif event_type == "ACHIEVEMENT_DIARY":
-            area = data.get("area", "Unknown")
-            key = f"Achievement Diary - {area}"
-            self.detail_sensors[key] = {
-                "value": data.get("difficulty", "Unknown"),
-                "attributes": {
-                    "area": area,
-                    "difficulty": data.get("difficulty"),
-                    "total": data.get("total"),
-                    "tasksCompleted": data.get("tasksCompleted"),
-                    "tasksTotal": data.get("tasksTotal"),
-                    "areaTasksCompleted": data.get("areaTasksCompleted"),
-                    "areaTasksTotal": data.get("areaTasksTotal"),
+                    "increased": data.get("combatLevelIncreased", False),
                 },
                 "last_update": now,
             }
@@ -132,10 +85,20 @@ class AccountState:
         if player_name:
             self.player_name = player_name
 
+        now = datetime.now(timezone.utc).isoformat()
+
         self.last_event_type = event_type
         self.last_event_summary = summary
         self.last_event_data = data
-        self.last_update = datetime.now(timezone.utc).isoformat()
+        self.last_update = now
+
+        # Update per-type last event
+        if event_type in self.TYPED_EVENT_TYPES:
+            self.last_typed_events[event_type] = {
+                "summary": summary,
+                "data": data,
+                "last_update": now,
+            }
 
         self._update_detail_sensors(event_type, data)
 
