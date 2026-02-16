@@ -1,12 +1,12 @@
 {
   "domain": "osrs_data",
   "name": "OSRS Data",
-  "codeowners": ["@RedFirebreak"],
+  "codeowners": ["@RedFirebreak", "@xXD4rkDragonXx"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks",
+  "documentation": "https://github.com/RedFirebreak/ha-osrs-data",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-runelite-webhooks/issues",
+  "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-data/issues",
   "requirements": [],
   "version": "2026.2.16"
 }
