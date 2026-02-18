@@ -1,0 +1,380 @@
+"""HTTP API views for the OSRS Data integration.
+
+Provides:
+  POST /api/osrs-data/pair         — consume a pairing code and receive a device token
+  POST /api/osrs-data/events       — submit event data (authenticated via X-Osrs-Token)
+  GET  /api/osrs-data/devices      — list paired devices
+  DELETE /api/osrs-data/devices/{device_id} — revoke a paired device
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any
+
+from aiohttp import web
+
+from homeassistant.core import HomeAssistant
+from homeassistant.components.http import HomeAssistantView
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+from .const import (
+    DOMAIN,
+    EVENT_TYPE,
+    DATA_ACCOUNT_STORE,
+    DATA_HISTORY_STORE,
+    DATA_DEDUPE_CACHE,
+    DATA_PAIRING_STORE,
+    DATA_STORE,
+    PAIRING_CODE_TTL,
+    SIGNAL_ACCOUNT_UPDATED,
+)
+from .parser.dispatcher import dispatch as dispatch_parser
+
+_LOGGER = logging.getLogger(__name__)
+
+# Delay (in seconds) before writing state to disk after a change.
+_SAVE_DELAY = 5
+
+_TOKEN_HEADER = "X-Osrs-Token"
+
+
+def _build_save_payload(entry_data: dict[str, Any]) -> dict[str, Any]:
+    """Build the storage payload from current entry data."""
+    save_data: dict[str, Any] = {}
+    history_store = entry_data.get(DATA_HISTORY_STORE)
+    if history_store is not None:
+        save_data["history"] = history_store.to_dict()
+    acct_store = entry_data.get(DATA_ACCOUNT_STORE)
+    if acct_store is not None:
+        save_data["accounts"] = acct_store.to_dict()
+    pairing_store = entry_data.get(DATA_PAIRING_STORE)
+    if pairing_store is not None:
+        save_data["paired_devices"] = pairing_store.to_dict()
+    return save_data
+
+
+def _build_normalized_event(
+    payload: dict[str, Any],
+    image_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a normalized event dict from a Dink payload."""
+    event: dict[str, Any] = {
+        "event_type": payload.get("type", "UNKNOWN"),
+        "account": {
+            "playerName": payload.get("playerName"),
+            "accountType": payload.get("accountType"),
+            "dinkAccountHash": payload.get("dinkAccountHash"),
+            "seasonalWorld": payload.get("seasonalWorld"),
+        },
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "data": payload.get("extra", {}),
+        "raw_meta": {},
+    }
+
+    if "world" in payload:
+        event["raw_meta"]["world"] = payload["world"]
+    if "regionId" in payload:
+        event["raw_meta"]["regionId"] = payload["regionId"]
+
+    if image_meta:
+        event["image"] = image_meta
+
+    return event
+
+
+def _get_file_size(file_obj: Any) -> int:
+    """Get file size by seeking (blocking I/O, run in executor)."""
+    file_obj.seek(0, 2)
+    size = file_obj.tell()
+    file_obj.seek(0)
+    return size
+
+
+def _extract_image_metadata(file_field: Any) -> dict[str, Any] | None:
+    """Extract basic metadata from an uploaded file field (no bytes persisted).
+
+    Note: call _get_file_size via hass.async_add_executor_job for the size.
+    """
+    if file_field is None:
+        return None
+
+    return {
+        "filename": getattr(file_field, "filename", None),
+        "content_type": getattr(file_field, "content_type", None),
+        "size": None,
+    }
+
+
+def _get_entry_data(hass: HomeAssistant) -> dict[str, Any] | None:
+    """Get the first (and typically only) entry data dict.
+
+    Skips internal keys (prefixed with ``_``) that we store under
+    ``hass.data[DOMAIN]`` for bookkeeping (e.g. ``_pending_pairings``).
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    for entry_id, entry_data in domain_data.items():
+        if isinstance(entry_id, str) and entry_id.startswith("_"):
+            continue
+        if isinstance(entry_data, dict):
+            return entry_data
+    return None
+
+
+def _schedule_save(entry_data: dict[str, Any]) -> None:
+    """Schedule a deferred write of all data to disk."""
+    store = entry_data.get(DATA_STORE)
+    if store is None:
+        return
+    store.async_delay_save(lambda: _build_save_payload(entry_data), _SAVE_DELAY)
+
+
+class OsrsPairCodeView(HomeAssistantView):
+    """Generate a pairing code (HA-authenticated, for the HA frontend/admin)."""
+
+    url = "/api/osrs-data/pair/code"
+    name = "api:osrs-data:pair:code"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Create a new pairing code for a RuneLite client."""
+        hass: HomeAssistant = request.app["hass"]
+        entry_data = _get_entry_data(hass)
+        if entry_data is None:
+            return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
+
+        pairing_store = entry_data.get(DATA_PAIRING_STORE)
+        if pairing_store is None:
+            return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        device_name = body.get("device_name", "RuneLite Client") if body else "RuneLite Client"
+
+        code = pairing_store.create_pairing_code(device_name)
+
+        return self.json({
+            "ok": True,
+            "code": code,
+            "expires_in": PAIRING_CODE_TTL,
+        })
+
+
+class OsrsPairView(HomeAssistantView):
+    """Handle pairing requests from RuneLite clients."""
+
+    url = "/api/osrs-data/pair"
+    name = "api:osrs-data:pair"
+    requires_auth = False
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Consume a pairing code and issue a device token."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return self.json({"ok": False, "error": "Invalid JSON"}, status_code=400)
+
+        code = body.get("code", "").strip()
+        if not code:
+            return self.json({"ok": False, "error": "Missing pairing code"}, status_code=400)
+
+        hass: HomeAssistant = request.app["hass"]
+
+        # 1. Try per-entry pairing stores first (the common path)
+        entry_data = _get_entry_data(hass)
+        live_pairing = (
+            entry_data.get(DATA_PAIRING_STORE) if entry_data else None
+        )
+
+        if live_pairing is not None:
+            result = live_pairing.consume_pairing_code(code)
+            if result is not None:
+                _schedule_save(entry_data)
+                return self.json({
+                    "ok": True,
+                    "device_id": result["device_id"],
+                    "token": result["token"],
+                })
+
+        # 2. Fall back to pending config-flow pairings (first-time setup)
+        pending_pairings = hass.data.get(DOMAIN, {}).get("_pending_pairings", {})
+        for _flow_id, pending in pending_pairings.items():
+            temp_store = pending.get("store")
+            if temp_store is not None:
+                result = temp_store.consume_pairing_code(code)
+                if result is not None:
+                    pending["result"] = result
+                    # Mirror the device into the live entry store so
+                    # the token is valid immediately for /events.
+                    if live_pairing is not None:
+                        live_pairing.register_device(
+                            result["device_id"],
+                            result["token"],
+                            result.get("name", ""),
+                        )
+                        _schedule_save(entry_data)
+                    return self.json({
+                        "ok": True,
+                        "device_id": result["device_id"],
+                        "token": result["token"],
+                    })
+
+        if entry_data is None:
+            return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
+        if live_pairing is None:
+            return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
+
+        return self.json({"ok": False, "error": "Invalid or expired pairing code"}, status_code=403)
+
+
+class OsrsEventsView(HomeAssistantView):
+    """Handle event submissions from paired RuneLite clients."""
+
+    url = "/api/osrs-data/events"
+    name = "api:osrs-data:events"
+    requires_auth = False
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Process an event submission."""
+        hass: HomeAssistant = request.app["hass"]
+        entry_data = _get_entry_data(hass)
+        if entry_data is None:
+            return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
+
+        # Authenticate via device token
+        token = request.headers.get(_TOKEN_HEADER, "").strip()
+        if not token:
+            return self.json({"ok": False, "error": "Missing authentication token"}, status_code=401)
+
+        pairing_store = entry_data.get(DATA_PAIRING_STORE)
+        if pairing_store is None:
+            return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
+
+        device_id = pairing_store.validate_token(token)
+        if device_id is None:
+            return self.json({"ok": False, "error": "Invalid or revoked token"}, status_code=403)
+
+        try:
+            content_type = request.headers.get("Content-Type", "")
+            payload: dict[str, Any] = {}
+            image_meta: dict[str, Any] | None = None
+
+            if "multipart/form-data" in content_type:
+                form = await request.post()
+                raw = form.get("payload_json")
+                if raw:
+                    payload = json.loads(raw)
+                file_field = form.get("file")
+                image_meta = _extract_image_metadata(file_field)
+                if (
+                    image_meta is not None
+                    and hasattr(file_field, "file")
+                    and file_field.file
+                ):
+                    image_meta["size"] = await hass.async_add_executor_job(
+                        _get_file_size, file_field.file
+                    )
+            else:
+                payload = await request.json()
+
+            event_data = _build_normalized_event(payload, image_meta)
+
+            event_type = payload.get("type", "UNKNOWN")
+            extra = payload.get("extra", {})
+            player_name = payload.get("playerName", "Unknown")
+            account_hash = payload.get("dinkAccountHash")
+            account_id = account_hash or player_name
+            if not account_hash:
+                _LOGGER.debug("No dinkAccountHash; using playerName as account key")
+
+            parsed = dispatch_parser(event_type, extra, player_name)
+
+            if parsed is not None:
+                # Dedupe check
+                dedupe = entry_data.get(DATA_DEDUPE_CACHE)
+                if dedupe is not None and dedupe.is_duplicate(
+                    account_id, event_type, extra
+                ):
+                    _LOGGER.debug(
+                        "Dropping duplicate event %s for %s", event_type, account_id
+                    )
+                    return self.json({"ok": True, "duplicate": True})
+
+                store = entry_data.get(DATA_ACCOUNT_STORE)
+                if store is not None:
+                    acct = store.get_or_create(account_hash, player_name)
+                    acct.record_event(
+                        event_type,
+                        parsed["summary"],
+                        parsed["data"],
+                        player_name=player_name,
+                    )
+
+                    # Record to history buffer
+                    history_store = entry_data.get(DATA_HISTORY_STORE)
+                    if history_store is not None:
+                        hist = history_store.get_or_create(account_id)
+                        hist.record(event_type, parsed["summary"], parsed["data"])
+
+                    async_dispatcher_send(
+                        hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
+                    )
+
+                    _schedule_save(entry_data)
+
+            hass.bus.async_fire(EVENT_TYPE, event_data)
+
+            return self.json({"ok": True})
+        except Exception as exc:
+            _LOGGER.exception("Event handling failed: %s", exc)
+            return self.json({"ok": False, "error": str(exc)}, status_code=500)
+
+
+class OsrsDevicesView(HomeAssistantView):
+    """List paired devices."""
+
+    url = "/api/osrs-data/devices"
+    name = "api:osrs-data:devices"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Return all paired devices."""
+        hass: HomeAssistant = request.app["hass"]
+        entry_data = _get_entry_data(hass)
+        if entry_data is None:
+            return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
+
+        pairing_store = entry_data.get(DATA_PAIRING_STORE)
+        if pairing_store is None:
+            return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
+
+        return self.json({"ok": True, "devices": pairing_store.list_devices()})
+
+
+class OsrsDeviceRevokeView(HomeAssistantView):
+    """Revoke a specific paired device."""
+
+    url = "/api/osrs-data/devices/{device_id}"
+    name = "api:osrs-data:devices:revoke"
+    requires_auth = True
+
+    async def delete(self, request: web.Request, device_id: str) -> web.Response:
+        """Revoke a paired device by its ID."""
+        hass: HomeAssistant = request.app["hass"]
+        entry_data = _get_entry_data(hass)
+        if entry_data is None:
+            return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
+
+        pairing_store = entry_data.get(DATA_PAIRING_STORE)
+        if pairing_store is None:
+            return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
+
+        if pairing_store.revoke_device(device_id):
+            _schedule_save(entry_data)
+            return self.json({"ok": True})
+        return self.json({"ok": False, "error": "Device not found"}, status_code=404)

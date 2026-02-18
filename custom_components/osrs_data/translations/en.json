@@ -3,9 +3,40 @@
     "step": {
       "user": {
         "title": "OSRS Data",
-        "description": "Create a webhook endpoint for RuneLite/Dink notifications.",
+        "description": "Set up the OSRS Data integration to receive RuneLite/Dink notifications.",
         "data": {
           "title": "Name"
+        }
+      },
+      "pair": {
+        "title": "Pair RuneLite Client",
+        "description": "Your pairing code is:\n\n## {code}\n\nClick **Submit**, then enter this code in your RuneLite plugin within {ttl_minutes} minutes.\n\nYou can pair additional clients later from the integration options."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pair New RuneLite Client",
+        "description": "Enter a name for the new RuneLite client.",
+        "data": {
+          "device_name": "Device name"
+        }
+      },
+      "pair_code": {
+        "title": "Pairing Code",
+        "description": "Enter this code in your RuneLite plugin:\n\n## {code}\n\nThe code expires in {ttl_minutes} minutes. Click **Submit** when done."
+      }
+    }
+  },
+  "services": {
+    "create_pairing_code": {
+      "name": "Create pairing code",
+      "description": "Generate a 6-digit one-time pairing code for a RuneLite client. The code expires after 5 minutes.",
+      "fields": {
+        "device_name": {
+          "name": "Device name",
+          "description": "A friendly name for the RuneLite client being paired."
         }
       }
     }

@@ -1,0 +1,15 @@
+create_pairing_code:
+  name: Create pairing code
+  description: >-
+    Generate a 6-digit one-time pairing code for a RuneLite client.
+    The code is valid for 5 minutes. A persistent notification will
+    appear in Home Assistant showing the code.
+  fields:
+    device_name:
+      name: Device name
+      description: A friendly name for this RuneLite client (e.g. "Desktop RuneLite", "Laptop").
+      required: false
+      default: "RuneLite Client"
+      example: "Desktop RuneLite"
+      selector:
+        text:

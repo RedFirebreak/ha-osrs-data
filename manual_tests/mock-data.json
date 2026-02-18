@@ -1,0 +1,24 @@
+{
+  "type": "LOOT",
+  "playerName": "TestPlayer",
+  "accountType": "NORMAL",
+  "dinkAccountHash": "manual_test_hash_abc123",
+  "seasonalWorld": false,
+  "world": 420,
+  "regionId": 14642,
+  "extra": {
+    "items": [
+      {
+        "id": 11286,
+        "quantity": 1,
+        "priceEach": 42069,
+        "name": "Dragon scimitar",
+        "rarity": 0.01,
+        "criteria": ["VALUE"]
+      }
+    ],
+    "source": "Manual Test Boss",
+    "category": "EVENT",
+    "killCount": 1
+  }
+}

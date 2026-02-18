@@ -12,7 +12,8 @@ for mod_name in (
     "homeassistant.core",
     "homeassistant.config_entries",
     "homeassistant.components",
-    "homeassistant.components.webhook",
+    "homeassistant.components.http",
+    "homeassistant.components.sensor",
     "homeassistant.helpers",
     "homeassistant.helpers.dispatcher",
     "homeassistant.helpers.entity_platform",
@@ -53,53 +54,44 @@ _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_data.sensor import OsrsWebhookStatusSensor  # noqa: E402
-from custom_components.osrs_data.const import CONF_WEBHOOK_ID  # noqa: E402
+from custom_components.osrs_data.sensor import OsrsStatusSensor  # noqa: E402
 
 
-class TestOsrsWebhookStatusSensor:
-    """Tests for the OsrsWebhookStatusSensor entity."""
+class TestOsrsStatusSensor:
+    """Tests for the OsrsStatusSensor entity."""
 
-    def _make_entry(self, webhook_id: str = "test-webhook-id-123"):
+    def _make_entry(self):
         entry = MagicMock()
         entry.entry_id = "entry_1"
-        entry.data = {CONF_WEBHOOK_ID: webhook_id}
+        entry.data = {}
         return entry
 
     def test_status_value_is_ready(self):
         entry = self._make_entry()
-        sensor = OsrsWebhookStatusSensor(entry)
+        sensor = OsrsStatusSensor(entry)
         assert sensor.native_value == "ready"
 
-    def test_extra_state_attributes_contains_webhook_id(self):
-        entry = self._make_entry("my-webhook-id")
-        sensor = OsrsWebhookStatusSensor(entry)
+    def test_extra_state_attributes_contains_events_endpoint(self):
+        entry = self._make_entry()
+        sensor = OsrsStatusSensor(entry)
         attrs = sensor.extra_state_attributes
-        assert attrs["webhook_id"] == "my-webhook-id"
+        assert attrs["events_endpoint"] == "/api/osrs-data/events"
 
-    def test_extra_state_attributes_contains_webhook_url(self):
-        entry = self._make_entry("my-webhook-id")
-        sensor = OsrsWebhookStatusSensor(entry)
+    def test_extra_state_attributes_contains_pair_endpoint(self):
+        entry = self._make_entry()
+        sensor = OsrsStatusSensor(entry)
         attrs = sensor.extra_state_attributes
-        assert attrs["webhook_url"] == "/api/webhook/my-webhook-id"
+        assert attrs["pair_endpoint"] == "/api/osrs-data/pair"
 
-    def test_webhook_url_format(self):
-        entry = self._make_entry("abc123")
-        sensor = OsrsWebhookStatusSensor(entry)
+    def test_no_webhook_attributes(self):
+        """Ensure no legacy webhook attributes are exposed."""
+        entry = self._make_entry()
+        sensor = OsrsStatusSensor(entry)
         attrs = sensor.extra_state_attributes
-        assert attrs["webhook_url"].startswith("/api/webhook/")
-        assert attrs["webhook_url"].endswith("abc123")
-
-    def test_missing_webhook_id_defaults_to_empty(self):
-        entry = MagicMock()
-        entry.entry_id = "entry_1"
-        entry.data = {}
-        sensor = OsrsWebhookStatusSensor(entry)
-        attrs = sensor.extra_state_attributes
-        assert attrs["webhook_id"] == ""
-        assert attrs["webhook_url"] == "/api/webhook/"
+        assert "webhook_id" not in attrs
+        assert "webhook_url" not in attrs
 
     def test_unique_id(self):
         entry = self._make_entry()
-        sensor = OsrsWebhookStatusSensor(entry)
+        sensor = OsrsStatusSensor(entry)
         assert sensor.unique_id == "entry_1_status"

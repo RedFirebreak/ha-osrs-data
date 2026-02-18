@@ -4,11 +4,11 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RedFirebreak&category=Integration&repository=ha-osrs-data)
 
-A Home Assistant custom integration that receives RuneLite (Dink) webhook notifications and turns them into:
+A Home Assistant custom integration that receives RuneLite (Dink) notifications and turns them into:
 - Home Assistant events (for automations)
 - Sensors/entities (for dashboards and history)
 - Persistent history (last X events per account/type survive restarts)
-- Automatic deduplication of webhook retries
+- Automatic deduplication of event retries
 
 ## Installation
 
@@ -20,28 +20,61 @@ A Home Assistant custom integration that receives RuneLite (Dink) webhook notifi
 ### Manual
 Copy `custom_components/osrs_data` from this repository into your Home Assistant `config/custom_components/` folder and restart.
 
-**Important:** The folder must be named `osrs_data` (matching the domain in manifest.json), not `ha-osrs-runelite-webhooks`.
+**Important:** The folder must be named `osrs_data` (matching the domain in manifest.json).
 
-## Setup
+## Setup & Pairing
 
+### First-time setup
+After HACS / manual installation of the plugin.
 1. Go to **Settings → Devices & services → Add integration**
 2. Search for **OSRS Data**
-3. Finish setup — the integration generates a unique webhook ID
+3. Enter a name for the integration → **Next**
+4. A **pairing code** is displayed
+5. In your RuneLite plugin, enter the code and your HA URL to pair
+6. Click **Submit** in Home Assistant — done!
 
-Your webhook URL will be:
+The plugin receives a device-specific token and uses it for all future requests.
+
+## Configuring the Runelite plugin
+1. With your **pairing code** ready, open the plugin's sidepanel.
+2. Enter the pairing-setting menu
+3. Configure HA-Data-exporter to point at your Home Assistant URL:
+   ```
+   https://<your-ha-domain>/
+   ```
+4. Enter your **pairing code**.
+5. Click the "pair" button
+6. Check your active pairing in the sidepanel
+7. (if not done already) Finish the integration setup in Home Assistant
+
+
+### Pairing additional clients
+
+Already have the integration set up and want to pair another computer?
+
+- **Options flow:** Go to **Settings → Integrations → OSRS Data → Configure** → enter a device name → get a new code
+- **Service:** Go to **Developer Tools → Services → `osrs_data.create_pairing_code`** → call it → a notification appears with the code
+
+Each pairing creates an independent device token. Existing tokens are never invalidated when new clients are added.
+
+### Revoking a client
+
+Individual clients can be revoked without affecting others:
 
 ```
-https://<your-ha-domain>/api/webhook/<webhook_id>
+DELETE /api/osrs-data/devices/{device_id}
 ```
+(Requires HA authentication)
 
-You can find `<webhook_id>` in the integration's config entry. If you use Nabu Casa, the URL follows the same pattern with your Nabu Casa domain.
+### Endpoints
 
-## Configuring Dink (RuneLite)
-
-1. In RuneLite, install the **Dink** plugin.
-2. Open Dink settings and set the **Primary Webhook URL** to your Home Assistant webhook URL.
-3. Enable the notification types you want (Deaths, Loot, Levels, Pets, Quests, Combat Achievements, Achievement Diaries).
-4. Dink sends `multipart/form-data` with `payload_json` (JSON) and an optional `file` (screenshot). This integration parses `payload_json` and uses the `type` and `extra` fields.
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `POST /api/osrs-data/pair` | None (code-gated) | Consume a pairing code, receive device token |
+| `POST /api/osrs-data/events` | `X-Osrs-Token` header | Submit event data |
+| `POST /api/osrs-data/pair/code` | HA auth | Generate a new pairing code |
+| `GET /api/osrs-data/devices` | HA auth | List paired devices |
+| `DELETE /api/osrs-data/devices/{id}` | HA auth | Revoke a device |
 
 ## Features
 
@@ -56,12 +89,15 @@ You can find `<webhook_id>` in the integration's config entry. If you use Nabu C
 | `QUEST` | Quest completions and progress |
 | `COMBAT_ACHIEVEMENT` | Combat task completions and tier progress |
 | `ACHIEVEMENT_DIARY` | Diary completions by area and difficulty |
+| `COLLECTION` | Collection log entries |
 
 ### Sensors
 
 For each RuneScape account, the integration creates:
 - **Counter sensors** — cumulative totals for each event type (levels, loot events, deaths, pets, quests, combat tasks, diaries)
 - **Last Event sensor** — the most recent event type, summary, and parsed data as attributes
+- **Per-type last event sensors** — last loot, last death, last pet, etc.
+- **Skill level sensors** — individual skill levels (created on first level event)
 
 ### Persistent history
 
@@ -72,9 +108,9 @@ Event history is stored per account and per event type using ring buffers:
 
 History survives Home Assistant restarts.
 
-### Webhook deduplication
+### Event deduplication
 
-If Dink retries a webhook (e.g., due to network issues), the integration ignores exact duplicate events within a 30-second window. Distinct events (different loot drops, different skills, etc.) always pass through.
+If Dink retries an event (e.g., due to network issues), the integration ignores exact duplicate events within a 30-second window. Distinct events (different loot drops, different skills, etc.) always pass through.
 
 ## Automations
 
@@ -172,7 +208,10 @@ The `data` field contains event-type-specific parsed data (see `samples/` for fu
 
 ## Privacy & Security
 
-Webhook URLs are effectively secret tokens. If your Home Assistant is exposed publicly, treat the webhook URL as sensitive and avoid sharing it.
+- Pairing codes are one-time-use and expire after 5 minutes.
+- Device tokens are scoped per client and hashed (SHA-256) at rest.
+- Individual clients can be revoked without affecting others.
+- No HA access tokens or webhook secrets are ever exposed to the plugin.
 
 ## Developer References
 

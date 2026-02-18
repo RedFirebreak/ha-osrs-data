@@ -13,7 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .account_store import AccountState
-from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
+from .const import DOMAIN, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up OSRS Data sensors from a config entry."""
-    async_add_entities([OsrsWebhookStatusSensor(entry)])
+    async_add_entities([OsrsStatusSensor(entry)])
 
     known_accounts: set[str] = set()
     known_detail_keys: dict[str, set[str]] = {}
@@ -89,11 +89,11 @@ async def async_setup_entry(
     )
 
 
-# ── Original status sensor (kept for backward compat) ──────────────
+# ── Status sensor ──────────────────────────────────────────────────
 
 
-class OsrsWebhookStatusSensor(SensorEntity):
-    """Simple status sensor for the webhook integration."""
+class OsrsStatusSensor(SensorEntity):
+    """Simple status sensor for the integration."""
 
     _attr_has_entity_name = True
     _attr_name = "Status"
@@ -105,11 +105,10 @@ class OsrsWebhookStatusSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return webhook_id and webhook_url for easy integration setup."""
-        webhook_id = self._entry.data.get(CONF_WEBHOOK_ID, "")
+        """Return API endpoints for setup."""
         return {
-            "webhook_id": webhook_id,
-            "webhook_url": f"/api/webhook/{webhook_id}",
+            "events_endpoint": "/api/osrs-data/events",
+            "pair_endpoint": "/api/osrs-data/pair",
         }
 
     @property
@@ -118,7 +117,7 @@ class OsrsWebhookStatusSensor(SensorEntity):
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": "OSRS Data",
             "manufacturer": "Custom",
-            "model": "Webhook Receiver",
+            "model": "Event Receiver",
         }
 
 
