@@ -292,3 +292,39 @@ class TestInjectPendingCode:
         assert r1 is not None
         assert r2 is not None
         assert r1["device_id"] != r2["device_id"]
+
+
+class TestRegisterDevice:
+    def test_register_and_validate(self):
+        """A device registered externally can be validated by token."""
+        store = PairingStore()
+        store.register_device("dev_abc", "raw_token_123", "My Laptop")
+        assert store.validate_token("raw_token_123") == "dev_abc"
+
+    def test_register_appears_in_list(self):
+        """Registered devices appear in list_devices."""
+        store = PairingStore()
+        store.register_device("dev_xyz", "tok_xyz", "Desktop")
+        devices = store.list_devices()
+        assert len(devices) == 1
+        assert devices[0]["device_id"] == "dev_xyz"
+        assert devices[0]["name"] == "Desktop"
+
+    def test_register_is_idempotent(self):
+        """Re-registering the same device overwrites it."""
+        store = PairingStore()
+        store.register_device("dev_1", "tok_v1", "First")
+        store.register_device("dev_1", "tok_v2", "Updated")
+        assert store.validate_token("tok_v2") == "dev_1"
+        assert store.validate_token("tok_v1") is None  # old token gone
+        assert len(store.list_devices()) == 1
+
+    def test_register_survives_persistence(self):
+        """Registered device survives to_dict / load_dict roundtrip."""
+        store = PairingStore()
+        store.register_device("dev_rt", "tok_rt", "Roundtrip")
+        data = store.to_dict()
+
+        store2 = PairingStore()
+        store2.load_dict(data)
+        assert store2.validate_token("tok_rt") == "dev_rt"

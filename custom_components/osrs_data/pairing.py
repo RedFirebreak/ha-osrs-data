@@ -122,6 +122,25 @@ class PairingStore:
             "name": device_name,
         }
 
+    def register_device(self, device_id: str, raw_token: str, name: str = "") -> None:
+        """Register an already-paired device (e.g. mirrored from a temp store).
+
+        This is idempotent — if the device already exists, it is overwritten.
+        """
+        # Remove old token index entry if re-registering
+        old_device = self._devices.get(device_id)
+        if old_device is not None:
+            self._token_index.pop(old_device.token_hash, None)
+
+        token_hash = _hash_token(raw_token)
+        device = PairedDevice(
+            device_id=device_id,
+            token_hash=token_hash,
+            name=name,
+        )
+        self._devices[device_id] = device
+        self._token_index[token_hash] = device_id
+
     def validate_token(self, token: str) -> str | None:
         """Validate a device token and return the device_id, or None."""
         token_hash = _hash_token(token)

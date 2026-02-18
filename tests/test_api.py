@@ -480,6 +480,50 @@ class TestOsrsPairViewConfigFlowPending:
         assert pending["result"]["device_id"] == body["device_id"]
 
     @pytest.mark.asyncio
+    async def test_pair_via_pending_mirrors_to_live_store(self):
+        """Pairing via temp store mirrors the device into the live entry store."""
+        import time
+
+        hass, _, live_pairing, _ = _make_hass_with_pairing()
+
+        # Simulate a pending config-flow temp store
+        temp_store = PairingStore()
+        temp_store.inject_pending_code("556677", "Flow Laptop", time.time() + 300)
+        hass.data[DOMAIN]["_pending_pairings"] = {
+            "flow_mirror": {"store": temp_store, "result": None}
+        }
+
+        # Pair via the temp store code
+        view = OsrsPairView()
+        request = _make_json_request(hass, {"code": "556677"})
+        result = await view.post(request)
+
+        assert result.status == 200
+        body = json.loads(result.body)
+        token = body["token"]
+        device_id = body["device_id"]
+
+        # The device should now be in the LIVE store (mirrored)
+        assert live_pairing.validate_token(token) == device_id
+
+        # So the events endpoint should accept this token
+        events_view = OsrsEventsView()
+        event_request = _make_json_request(
+            hass,
+            {
+                "type": "LOOT",
+                "playerName": "TestPlayer",
+                "dinkAccountHash": "test_hash",
+                "extra": {"items": [], "source": "Test", "category": "EVENT"},
+            },
+            headers={"X-Osrs-Token": token},
+        )
+        event_result = await events_view.post(event_request)
+        assert event_result.status == 200
+        event_body = json.loads(event_result.body)
+        assert event_body["ok"] is True
+
+    @pytest.mark.asyncio
     async def test_pair_invalid_code_falls_through_to_entry(self):
         """Invalid code in pending falls through to per-entry store check."""
         import time

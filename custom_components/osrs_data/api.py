@@ -185,7 +185,23 @@ class OsrsPairView(HomeAssistantView):
 
         hass: HomeAssistant = request.app["hass"]
 
-        # 1. Check pending config-flow pairings (before any entry exists)
+        # 1. Try per-entry pairing stores first (the common path)
+        entry_data = _get_entry_data(hass)
+        live_pairing = (
+            entry_data.get(DATA_PAIRING_STORE) if entry_data else None
+        )
+
+        if live_pairing is not None:
+            result = live_pairing.consume_pairing_code(code)
+            if result is not None:
+                _schedule_save(entry_data)
+                return self.json({
+                    "ok": True,
+                    "device_id": result["device_id"],
+                    "token": result["token"],
+                })
+
+        # 2. Fall back to pending config-flow pairings (first-time setup)
         pending_pairings = hass.data.get(DOMAIN, {}).get("_pending_pairings", {})
         for _flow_id, pending in pending_pairings.items():
             temp_store = pending.get("store")
@@ -193,33 +209,27 @@ class OsrsPairView(HomeAssistantView):
                 result = temp_store.consume_pairing_code(code)
                 if result is not None:
                     pending["result"] = result
+                    # Mirror the device into the live entry store so
+                    # the token is valid immediately for /events.
+                    if live_pairing is not None:
+                        live_pairing.register_device(
+                            result["device_id"],
+                            result["token"],
+                            result.get("name", ""),
+                        )
+                        _schedule_save(entry_data)
                     return self.json({
                         "ok": True,
                         "device_id": result["device_id"],
                         "token": result["token"],
                     })
 
-        # 2. Check per-entry pairing stores
-        entry_data = _get_entry_data(hass)
         if entry_data is None:
             return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
-
-        pairing_store = entry_data.get(DATA_PAIRING_STORE)
-        if pairing_store is None:
+        if live_pairing is None:
             return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
 
-        result = pairing_store.consume_pairing_code(code)
-        if result is None:
-            return self.json({"ok": False, "error": "Invalid or expired pairing code"}, status_code=403)
-
-        # Persist the new device
-        _schedule_save(entry_data)
-
-        return self.json({
-            "ok": True,
-            "device_id": result["device_id"],
-            "token": result["token"],
-        })
+        return self.json({"ok": False, "error": "Invalid or expired pairing code"}, status_code=403)
 
 
 class OsrsEventsView(HomeAssistantView):
