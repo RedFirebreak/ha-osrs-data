@@ -171,4 +171,31 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             store = entry_data.get(DATA_STORE)
             if store is not None:
                 await store.async_save(_build_save_payload(entry_data))
+
+        # If no more entries, clean up domain-level state so a fresh
+        # install/re-add goes through a clean path.
+        remaining = {
+            k: v
+            for k, v in hass.data.get(DOMAIN, {}).items()
+            if not isinstance(k, str) or not k.startswith("_")
+        }
+        if not remaining:
+            # Unregister the service
+            if hass.services.has_service(DOMAIN, "create_pairing_code"):
+                hass.services.async_remove(DOMAIN, "create_pairing_code")
+            # Clear all domain-level flags so views re-register on next setup
+            hass.data.pop(DOMAIN, None)
+            _LOGGER.debug("All OSRS Data entries removed — domain state cleaned up")
+
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle removal (deletion) of a config entry.
+
+    This fires *after* async_unload_entry and removes persisted storage
+    so the next install starts completely fresh.
+    """
+    store = get_store(hass)
+    await store.async_remove()
+    _LOGGER.info("OSRS Data storage removed for deleted entry")
