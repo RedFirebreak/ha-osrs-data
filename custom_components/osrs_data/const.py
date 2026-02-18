@@ -2,7 +2,6 @@ DOMAIN = "osrs_data"
 
 EVENT_TYPE = "osrs_data_event"
 
-CONF_WEBHOOK_ID = "webhook_id"
 CONF_TITLE = "title"
 
 # Storage

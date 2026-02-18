@@ -1,4 +1,4 @@
-"""TTL-based soft deduplication for webhook retries."""
+"""TTL-based soft deduplication for event retries."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _build_signature(
 
 
 class DedupeCache:
-    """TTL cache that drops exact duplicate webhooks within a time window."""
+    """TTL cache that drops exact duplicate events within a time window."""
 
     def __init__(self, ttl: int = DEFAULT_TTL) -> None:
         self._ttl = ttl
@@ -67,7 +67,7 @@ class DedupeCache:
         sig = _build_signature(account_id, event_type, extra)
         now = time.monotonic()
         if sig in self._seen:
-            _LOGGER.debug("Duplicate webhook detected (sig=%s…)", sig[:12])
+            _LOGGER.debug("Duplicate event detected (sig=%s…)", sig[:12])
             return True
         self._seen[sig] = now
         return False

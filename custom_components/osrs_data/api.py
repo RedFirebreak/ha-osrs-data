@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from aiohttp import web
@@ -30,17 +31,80 @@ from .const import (
     SIGNAL_ACCOUNT_UPDATED,
 )
 from .parser.dispatcher import dispatch as dispatch_parser
-from .webhook import (
-    _build_normalized_event,
-    _extract_image_metadata,
-    _get_file_size,
-    _build_save_payload,
-    _SAVE_DELAY,
-)
 
 _LOGGER = logging.getLogger(__name__)
 
+# Delay (in seconds) before writing state to disk after a change.
+_SAVE_DELAY = 5
+
 _TOKEN_HEADER = "X-Osrs-Token"
+
+
+def _build_save_payload(entry_data: dict[str, Any]) -> dict[str, Any]:
+    """Build the storage payload from current entry data."""
+    save_data: dict[str, Any] = {}
+    history_store = entry_data.get(DATA_HISTORY_STORE)
+    if history_store is not None:
+        save_data["history"] = history_store.to_dict()
+    acct_store = entry_data.get(DATA_ACCOUNT_STORE)
+    if acct_store is not None:
+        save_data["accounts"] = acct_store.to_dict()
+    pairing_store = entry_data.get(DATA_PAIRING_STORE)
+    if pairing_store is not None:
+        save_data["paired_devices"] = pairing_store.to_dict()
+    return save_data
+
+
+def _build_normalized_event(
+    payload: dict[str, Any],
+    image_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a normalized event dict from a Dink payload."""
+    event: dict[str, Any] = {
+        "event_type": payload.get("type", "UNKNOWN"),
+        "account": {
+            "playerName": payload.get("playerName"),
+            "accountType": payload.get("accountType"),
+            "dinkAccountHash": payload.get("dinkAccountHash"),
+            "seasonalWorld": payload.get("seasonalWorld"),
+        },
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "data": payload.get("extra", {}),
+        "raw_meta": {},
+    }
+
+    if "world" in payload:
+        event["raw_meta"]["world"] = payload["world"]
+    if "regionId" in payload:
+        event["raw_meta"]["regionId"] = payload["regionId"]
+
+    if image_meta:
+        event["image"] = image_meta
+
+    return event
+
+
+def _get_file_size(file_obj: Any) -> int:
+    """Get file size by seeking (blocking I/O, run in executor)."""
+    file_obj.seek(0, 2)
+    size = file_obj.tell()
+    file_obj.seek(0)
+    return size
+
+
+def _extract_image_metadata(file_field: Any) -> dict[str, Any] | None:
+    """Extract basic metadata from an uploaded file field (no bytes persisted).
+
+    Note: call _get_file_size via hass.async_add_executor_job for the size.
+    """
+    if file_field is None:
+        return None
+
+    return {
+        "filename": getattr(file_field, "filename", None),
+        "content_type": getattr(file_field, "content_type", None),
+        "size": None,
+    }
 
 
 def _get_entry_data(hass: HomeAssistant) -> dict[str, Any] | None:

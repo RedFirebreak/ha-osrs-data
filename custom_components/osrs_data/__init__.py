@@ -7,10 +7,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .account_store import AccountStore
-from .api import OsrsDeviceRevokeView, OsrsDevicesView, OsrsEventsView, OsrsPairView
+from .api import OsrsDeviceRevokeView, OsrsDevicesView, OsrsEventsView, OsrsPairView, _build_save_payload
 from .const import (
     DOMAIN,
-    CONF_WEBHOOK_ID,
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
     DATA_DEDUPE_CACHE,
@@ -22,7 +21,6 @@ from .dedupe import DedupeCache
 from .history import HistoryStore
 from .pairing import PairingStore
 from .storage import get_store
-from .webhook import async_register_webhook
 
 PLATFORMS: list[str] = ["sensor"]
 
@@ -62,17 +60,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_STORE: store,
     }
 
-    # Register legacy webhook endpoint (backward compatibility)
-    async_register_webhook(hass, entry)
-
-    # Register new API views for pairing flow
+    # Register API views for pairing flow
     hass.http.register_view(OsrsPairView())
     hass.http.register_view(OsrsEventsView())
     hass.http.register_view(OsrsDevicesView())
     hass.http.register_view(OsrsDeviceRevokeView())
 
-    webhook_id = entry.data.get(CONF_WEBHOOK_ID, "")
-    _LOGGER.info("OSRS Data registered at /api/webhook/%s", webhook_id)
     _LOGGER.info("OSRS Data events endpoint at /api/osrs-data/events")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -94,6 +87,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry_data and isinstance(entry_data, dict):
             store = entry_data.get(DATA_STORE)
             if store is not None:
-                from .webhook import _build_save_payload
                 await store.async_save(_build_save_payload(entry_data))
     return unload_ok
