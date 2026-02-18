@@ -19,6 +19,6 @@ DATA_PAIRING_STORE = "pairing_store"
 SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
 
 # Pairing
-PAIRING_CODE_LENGTH = 6
+PAIRING_CODE_LENGTH = 5
 PAIRING_CODE_TTL = 300  # seconds (5 minutes)
 DEVICE_TOKEN_LENGTH = 64  # hex characters

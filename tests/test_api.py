@@ -383,7 +383,7 @@ class TestOsrsPairCodeView:
         body = json.loads(result.body)
         assert body["ok"] is True
         assert "code" in body
-        assert len(body["code"]) == 6
+        assert len(body["code"]) == 5
         assert body["code"].isdigit()
         assert "expires_in" in body
 
@@ -399,7 +399,7 @@ class TestOsrsPairCodeView:
         assert result.status == 200
         body = json.loads(result.body)
         assert body["ok"] is True
-        assert len(body["code"]) == 6
+        assert len(body["code"]) == 5
 
     @pytest.mark.asyncio
     async def test_generated_code_is_consumable(self):
