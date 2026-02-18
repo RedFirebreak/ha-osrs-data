@@ -109,9 +109,15 @@ def _extract_image_metadata(file_field: Any) -> dict[str, Any] | None:
 
 
 def _get_entry_data(hass: HomeAssistant) -> dict[str, Any] | None:
-    """Get the first (and typically only) entry data dict."""
+    """Get the first (and typically only) entry data dict.
+
+    Skips internal keys (prefixed with ``_``) that we store under
+    ``hass.data[DOMAIN]`` for bookkeeping (e.g. ``_pending_pairings``).
+    """
     domain_data = hass.data.get(DOMAIN, {})
     for entry_id, entry_data in domain_data.items():
+        if isinstance(entry_id, str) and entry_id.startswith("_"):
+            continue
         if isinstance(entry_data, dict):
             return entry_data
     return None
