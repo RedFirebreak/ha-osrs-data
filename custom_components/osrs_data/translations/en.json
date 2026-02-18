@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "OSRS Data",
-        "description": "Create a webhook endpoint for RuneLite/Dink notifications.",
+        "description": "Create an endpoint for RuneLite/Dink notifications. Use the pairing flow to securely connect your RuneLite plugin.",
         "data": {
           "title": "Name"
         }

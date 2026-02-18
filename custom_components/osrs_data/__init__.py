@@ -7,9 +7,20 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .account_store import AccountStore
-from .const import DOMAIN, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, DATA_STORE, SIGNAL_ACCOUNT_UPDATED
+from .api import OsrsDeviceRevokeView, OsrsDevicesView, OsrsEventsView, OsrsPairView
+from .const import (
+    DOMAIN,
+    CONF_WEBHOOK_ID,
+    DATA_ACCOUNT_STORE,
+    DATA_HISTORY_STORE,
+    DATA_DEDUPE_CACHE,
+    DATA_PAIRING_STORE,
+    DATA_STORE,
+    SIGNAL_ACCOUNT_UPDATED,
+)
 from .dedupe import DedupeCache
 from .history import HistoryStore
+from .pairing import PairingStore
 from .storage import get_store
 from .webhook import async_register_webhook
 
@@ -33,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     history_store = HistoryStore()
     account_store = AccountStore()
+    pairing_store = PairingStore()
 
     # Restore persisted data
     store = get_store(hass)
@@ -40,18 +52,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if stored and isinstance(stored, dict):
         history_store.load_dict(stored.get("history", {}))
         account_store.load_dict(stored.get("accounts") or [])
+        pairing_store.load_dict(stored.get("paired_devices") or [])
 
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
         DATA_DEDUPE_CACHE: DedupeCache(),
+        DATA_PAIRING_STORE: pairing_store,
         DATA_STORE: store,
     }
 
+    # Register legacy webhook endpoint (backward compatibility)
     async_register_webhook(hass, entry)
+
+    # Register new API views for pairing flow
+    hass.http.register_view(OsrsPairView())
+    hass.http.register_view(OsrsEventsView())
+    hass.http.register_view(OsrsDevicesView())
+    hass.http.register_view(OsrsDeviceRevokeView())
 
     webhook_id = entry.data.get(CONF_WEBHOOK_ID, "")
     _LOGGER.info("OSRS Data registered at /api/webhook/%s", webhook_id)
+    _LOGGER.info("OSRS Data events endpoint at /api/osrs-data/events")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

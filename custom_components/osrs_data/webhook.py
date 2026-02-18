@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.webhook import async_register
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, DATA_STORE, SIGNAL_ACCOUNT_UPDATED
+from .const import DOMAIN, EVENT_TYPE, CONF_WEBHOOK_ID, DATA_ACCOUNT_STORE, DATA_HISTORY_STORE, DATA_DEDUPE_CACHE, DATA_PAIRING_STORE, DATA_STORE, SIGNAL_ACCOUNT_UPDATED
 from .parser.dispatcher import dispatch as dispatch_parser
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +30,9 @@ def _build_save_payload(entry_data: dict[str, Any]) -> dict[str, Any]:
     acct_store = entry_data.get(DATA_ACCOUNT_STORE)
     if acct_store is not None:
         save_data["accounts"] = acct_store.to_dict()
+    pairing_store = entry_data.get(DATA_PAIRING_STORE)
+    if pairing_store is not None:
+        save_data["paired_devices"] = pairing_store.to_dict()
     return save_data
 
 

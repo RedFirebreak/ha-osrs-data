@@ -12,6 +12,7 @@ for mod_name in (
     "homeassistant.core",
     "homeassistant.config_entries",
     "homeassistant.components",
+    "homeassistant.components.http",
     "homeassistant.components.webhook",
     "homeassistant.helpers",
     "homeassistant.helpers.dispatcher",
@@ -103,3 +104,15 @@ class TestOsrsWebhookStatusSensor:
         entry = self._make_entry()
         sensor = OsrsWebhookStatusSensor(entry)
         assert sensor.unique_id == "entry_1_status"
+
+    def test_extra_state_attributes_contains_events_endpoint(self):
+        entry = self._make_entry("my-webhook-id")
+        sensor = OsrsWebhookStatusSensor(entry)
+        attrs = sensor.extra_state_attributes
+        assert attrs["events_endpoint"] == "/api/osrs-data/events"
+
+    def test_extra_state_attributes_contains_pair_endpoint(self):
+        entry = self._make_entry("my-webhook-id")
+        sensor = OsrsWebhookStatusSensor(entry)
+        attrs = sensor.extra_state_attributes
+        assert attrs["pair_endpoint"] == "/api/osrs-data/pair"

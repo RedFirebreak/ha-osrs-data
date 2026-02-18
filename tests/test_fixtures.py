@@ -15,6 +15,7 @@ for mod_name in (
     "homeassistant.config_entries",
     "homeassistant.components",
     "homeassistant.components.sensor",
+    "homeassistant.components.http",
     "homeassistant.components.webhook",
     "homeassistant.helpers",
     "homeassistant.helpers.dispatcher",

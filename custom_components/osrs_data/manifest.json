@@ -3,7 +3,7 @@
   "name": "OSRS Data",
   "codeowners": ["@RedFirebreak", "@xXD4rkDragonXx"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http"],
   "documentation": "https://github.com/RedFirebreak/ha-osrs-data",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-data/issues",

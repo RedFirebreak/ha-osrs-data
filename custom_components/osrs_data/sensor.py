@@ -105,11 +105,13 @@ class OsrsWebhookStatusSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return webhook_id and webhook_url for easy integration setup."""
+        """Return webhook_id, webhook_url, and events endpoint for setup."""
         webhook_id = self._entry.data.get(CONF_WEBHOOK_ID, "")
         return {
             "webhook_id": webhook_id,
             "webhook_url": f"/api/webhook/{webhook_id}",
+            "events_endpoint": "/api/osrs-data/events",
+            "pair_endpoint": "/api/osrs-data/pair",
         }
 
     @property
