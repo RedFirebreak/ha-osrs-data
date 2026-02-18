@@ -28,6 +28,7 @@ from .const import (
     DATA_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
+    PAIRING_CODE_TTL,
     SIGNAL_ACCOUNT_UPDATED,
 )
 from .parser.dispatcher import dispatch as dispatch_parser
@@ -124,6 +125,40 @@ def _schedule_save(entry_data: dict[str, Any]) -> None:
     store.async_delay_save(lambda: _build_save_payload(entry_data), _SAVE_DELAY)
 
 
+class OsrsPairCodeView(HomeAssistantView):
+    """Generate a pairing code (HA-authenticated, for the HA frontend/admin)."""
+
+    url = "/api/osrs-data/pair/code"
+    name = "api:osrs-data:pair:code"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Create a new pairing code for a RuneLite client."""
+        hass: HomeAssistant = request.app["hass"]
+        entry_data = _get_entry_data(hass)
+        if entry_data is None:
+            return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)
+
+        pairing_store = entry_data.get(DATA_PAIRING_STORE)
+        if pairing_store is None:
+            return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        device_name = body.get("device_name", "RuneLite Client") if body else "RuneLite Client"
+
+        code = pairing_store.create_pairing_code(device_name)
+
+        return self.json({
+            "ok": True,
+            "code": code,
+            "expires_in": PAIRING_CODE_TTL,
+        })
+
+
 class OsrsPairView(HomeAssistantView):
     """Handle pairing requests from RuneLite clients."""
 
@@ -143,6 +178,22 @@ class OsrsPairView(HomeAssistantView):
             return self.json({"ok": False, "error": "Missing pairing code"}, status_code=400)
 
         hass: HomeAssistant = request.app["hass"]
+
+        # 1. Check pending config-flow pairings (before any entry exists)
+        pending_pairings = hass.data.get(DOMAIN, {}).get("_pending_pairings", {})
+        for _flow_id, pending in pending_pairings.items():
+            temp_store = pending.get("store")
+            if temp_store is not None:
+                result = temp_store.consume_pairing_code(code)
+                if result is not None:
+                    pending["result"] = result
+                    return self.json({
+                        "ok": True,
+                        "device_id": result["device_id"],
+                        "token": result["token"],
+                    })
+
+        # 2. Check per-entry pairing stores
         entry_data = _get_entry_data(hass)
         if entry_data is None:
             return self.json({"ok": False, "error": "Integration not configured"}, status_code=503)

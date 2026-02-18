@@ -254,3 +254,41 @@ class TestPairingStore:
         data = store.to_dict()
         # Pending codes are not in the serialized output
         assert data == []
+
+
+class TestInjectPendingCode:
+    def test_inject_and_consume(self):
+        """Injected code can be consumed to pair a device."""
+        import time
+
+        store = PairingStore()
+        store.inject_pending_code("123456", "Injected Device", time.time() + 300)
+        result = store.consume_pairing_code("123456")
+        assert result is not None
+        assert result["name"] == "Injected Device"
+        assert "token" in result
+        assert "device_id" in result
+
+    def test_inject_expired_code_rejected(self):
+        """An injected code with an expired TTL is rejected."""
+        import time
+
+        store = PairingStore()
+        store.inject_pending_code("654321", "Old Device", time.time() - 10)
+        result = store.consume_pairing_code("654321")
+        assert result is None
+
+    def test_inject_does_not_affect_existing_codes(self):
+        """Injecting a code doesn't affect codes from create_pairing_code."""
+        import time
+
+        store = PairingStore()
+        created_code = store.create_pairing_code("Created")
+        store.inject_pending_code("999999", "Injected", time.time() + 300)
+
+        # Both should be consumable
+        r1 = store.consume_pairing_code(created_code)
+        r2 = store.consume_pairing_code("999999")
+        assert r1 is not None
+        assert r2 is not None
+        assert r1["device_id"] != r2["device_id"]

@@ -51,6 +51,7 @@ from custom_components.osrs_data.api import (  # noqa: E402
     OsrsDeviceRevokeView,
     OsrsDevicesView,
     OsrsEventsView,
+    OsrsPairCodeView,
     OsrsPairView,
 )
 from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
@@ -363,3 +364,154 @@ class TestOsrsDeviceRevokeView:
         assert result.status == 404
         body = json.loads(result.body)
         assert body["ok"] is False
+
+
+# ── Pair code generation endpoint tests ──────────────────────────────
+
+
+class TestOsrsPairCodeView:
+    @pytest.mark.asyncio
+    async def test_generate_code_default_name(self):
+        """Generating a code with no device_name uses the default."""
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+
+        view = OsrsPairCodeView()
+        request = _make_json_request(hass, {})
+        result = await view.post(request)
+
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body["ok"] is True
+        assert "code" in body
+        assert len(body["code"]) == 6
+        assert body["code"].isdigit()
+        assert "expires_in" in body
+
+    @pytest.mark.asyncio
+    async def test_generate_code_custom_name(self):
+        """Generating a code with a custom device_name."""
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+
+        view = OsrsPairCodeView()
+        request = _make_json_request(hass, {"device_name": "My Laptop"})
+        result = await view.post(request)
+
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body["ok"] is True
+        assert len(body["code"]) == 6
+
+    @pytest.mark.asyncio
+    async def test_generated_code_is_consumable(self):
+        """A code generated via the API endpoint can be consumed to pair."""
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+
+        # Generate code via the view
+        view = OsrsPairCodeView()
+        request = _make_json_request(hass, {"device_name": "Test Device"})
+        result = await view.post(request)
+        code = json.loads(result.body)["code"]
+
+        # Now consume it via the pair view
+        pair_view = OsrsPairView()
+        pair_request = _make_json_request(hass, {"code": code})
+        pair_result = await pair_view.post(pair_request)
+
+        assert pair_result.status == 200
+        pair_body = json.loads(pair_result.body)
+        assert pair_body["ok"] is True
+        assert "token" in pair_body
+
+    @pytest.mark.asyncio
+    async def test_generate_code_no_integration(self):
+        """Returns 503 when no integration is configured."""
+        hass = MagicMock()
+        hass.data = {}
+
+        view = OsrsPairCodeView()
+        request = _make_json_request(hass, {})
+        result = await view.post(request)
+
+        assert result.status == 503
+
+
+# ── Config-flow pending pairing tests ────────────────────────────────
+
+
+class TestOsrsPairViewConfigFlowPending:
+    """Test the pair endpoint with _pending_pairings (config flow codes)."""
+
+    @pytest.mark.asyncio
+    async def test_pair_via_pending_config_flow_code(self):
+        """Code from a pending config flow is consumed correctly."""
+        import time
+
+        hass = MagicMock()
+        hass.bus = MagicMock()
+
+        # Simulate a config flow that stored a pending pairing
+        temp_store = PairingStore()
+        temp_store.inject_pending_code("112233", "Flow Device", time.time() + 300)
+
+        hass.data = {
+            DOMAIN: {
+                "_pending_pairings": {
+                    "flow_abc": {
+                        "store": temp_store,
+                        "result": None,
+                    }
+                }
+            }
+        }
+
+        view = OsrsPairView()
+        request = _make_json_request(hass, {"code": "112233"})
+        result = await view.post(request)
+
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body["ok"] is True
+        assert "token" in body
+        assert "device_id" in body
+
+        # The pending entry should have the result stored
+        pending = hass.data[DOMAIN]["_pending_pairings"]["flow_abc"]
+        assert pending["result"] is not None
+        assert pending["result"]["device_id"] == body["device_id"]
+
+    @pytest.mark.asyncio
+    async def test_pair_invalid_code_falls_through_to_entry(self):
+        """Invalid code in pending falls through to per-entry store check."""
+        import time
+
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+
+        # Add a pending config flow with a different code
+        temp_store = PairingStore()
+        temp_store.inject_pending_code("999999", "Flow", time.time() + 300)
+        hass.data[DOMAIN]["_pending_pairings"] = {
+            "flow_x": {"store": temp_store, "result": None}
+        }
+
+        # Create a code in the per-entry store
+        entry_code = pairing_store.create_pairing_code("Entry Device")
+
+        view = OsrsPairView()
+        request = _make_json_request(hass, {"code": entry_code})
+        result = await view.post(request)
+
+        assert result.status == 200
+        body = json.loads(result.body)
+        assert body["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_pair_no_entries_no_pending(self):
+        """No entries and no pending pairings returns 503."""
+        hass = MagicMock()
+        hass.data = {DOMAIN: {}}
+
+        view = OsrsPairView()
+        request = _make_json_request(hass, {"code": "000000"})
+        result = await view.post(request)
+
+        assert result.status == 503

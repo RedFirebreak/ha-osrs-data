@@ -158,6 +158,15 @@ class PairingStore:
         for code in expired:
             del self._pending_codes[code]
 
+    def inject_pending_code(
+        self, code: str, device_name: str, expires_at: float
+    ) -> None:
+        """Inject a pending pairing code created externally (e.g. during config flow)."""
+        self._pending_codes[code] = {
+            "expires_at": expires_at,
+            "device_name": device_name,
+        }
+
     def to_dict(self) -> list[dict[str, Any]]:
         """Serialize all paired devices for persistence."""
         return [d.to_dict() for d in self._devices.values()]

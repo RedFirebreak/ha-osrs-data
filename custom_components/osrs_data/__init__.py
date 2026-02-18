@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import logging
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .account_store import AccountStore
-from .api import OsrsDeviceRevokeView, OsrsDevicesView, OsrsEventsView, OsrsPairView, _build_save_payload
+from .api import (
+    OsrsDeviceRevokeView,
+    OsrsDevicesView,
+    OsrsEventsView,
+    OsrsPairCodeView,
+    OsrsPairView,
+    _build_save_payload,
+)
 from .const import (
     DOMAIN,
     DATA_ACCOUNT_STORE,
@@ -15,6 +23,7 @@ from .const import (
     DATA_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
+    PAIRING_CODE_TTL,
     SIGNAL_ACCOUNT_UPDATED,
 )
 from .dedupe import DedupeCache
@@ -51,6 +60,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         history_store.load_dict(stored.get("history", {}))
         account_store.load_dict(stored.get("accounts") or [])
         pairing_store.load_dict(stored.get("paired_devices") or [])
+    else:
+        # First run — load paired devices created during config flow
+        import time as _time
+
+        initial_devices = entry.data.get("initial_devices", [])
+        if initial_devices:
+            pairing_store.load_dict(initial_devices)
+            _LOGGER.info("Loaded %d device(s) paired during setup", len(initial_devices))
+
+        # If the user clicked Submit before RuneLite paired, inject
+        # the pending code with a fresh TTL so they can still pair.
+        initial_pair = entry.data.get("initial_pair")
+        if initial_pair:
+            pairing_store.inject_pending_code(
+                code=initial_pair["code"],
+                device_name=initial_pair.get("device_name", ""),
+                expires_at=_time.time() + PAIRING_CODE_TTL,
+            )
+            _LOGGER.info(
+                "Pairing code ready — enter it in RuneLite within %d minutes",
+                PAIRING_CODE_TTL // 60,
+            )
 
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
@@ -60,11 +91,63 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_STORE: store,
     }
 
-    # Register API views for pairing flow
-    hass.http.register_view(OsrsPairView())
-    hass.http.register_view(OsrsEventsView())
-    hass.http.register_view(OsrsDevicesView())
-    hass.http.register_view(OsrsDeviceRevokeView())
+    # Register API views (guarded — may already be registered by config flow)
+    if not hass.data[DOMAIN].get("_views_registered"):
+        hass.data[DOMAIN]["_views_registered"] = True
+        hass.http.register_view(OsrsPairCodeView())
+        hass.http.register_view(OsrsPairView())
+        hass.http.register_view(OsrsEventsView())
+        hass.http.register_view(OsrsDevicesView())
+        hass.http.register_view(OsrsDeviceRevokeView())
+    elif not hass.data[DOMAIN].get("_pair_view_registered"):
+        # Config flow only registered the pair view — register the rest
+        hass.data[DOMAIN]["_views_registered"] = True
+        hass.http.register_view(OsrsPairCodeView())
+        hass.http.register_view(OsrsEventsView())
+        hass.http.register_view(OsrsDevicesView())
+        hass.http.register_view(OsrsDeviceRevokeView())
+
+    # Register services
+    async def _handle_create_pairing_code(call: ServiceCall) -> ServiceResponse:
+        """Handle the create_pairing_code service call."""
+        device_name = call.data.get("device_name", "RuneLite Client")
+        entry_data_svc = hass.data[DOMAIN].get(entry.entry_id)
+        if entry_data_svc is None:
+            raise ValueError("Integration not configured")
+        pairing = entry_data_svc.get(DATA_PAIRING_STORE)
+        if pairing is None:
+            raise ValueError("Pairing store not available")
+        code = pairing.create_pairing_code(device_name)
+
+        # Fire a persistent notification so the user can see the code in the HA UI
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "OSRS Data — Pairing Code",
+                "message": (
+                    f"Enter this code in your RuneLite plugin to pair:\n\n"
+                    f"## **{code}**\n\n"
+                    f"Device name: *{device_name}*\n\n"
+                    f"This code expires in 5 minutes."
+                ),
+                "notification_id": f"osrs_data_pairing_{code}",
+            },
+        )
+        return {"code": code, "expires_in": PAIRING_CODE_TTL}
+
+    if not hass.services.has_service(DOMAIN, "create_pairing_code"):
+        hass.services.async_register(
+            DOMAIN,
+            "create_pairing_code",
+            _handle_create_pairing_code,
+            schema=vol.Schema(
+                {
+                    vol.Optional("device_name", default="RuneLite Client"): str,
+                }
+            ),
+            supports_response=SupportsResponse.OPTIONAL,
+        )
 
     _LOGGER.info("OSRS Data events endpoint at /api/osrs-data/events")
 
