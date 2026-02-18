@@ -51,8 +51,8 @@ class TestGeneratePairingCode:
 
     def test_codes_are_unique(self):
         codes = {_generate_pairing_code() for _ in range(100)}
-        # Statistically, 100 6-digit codes should have many unique values
-        assert len(codes) > 50
+        # 100 random 6-digit codes: collisions are possible but very rare
+        assert len(codes) >= 90
 
 
 class TestGenerateDeviceToken:
