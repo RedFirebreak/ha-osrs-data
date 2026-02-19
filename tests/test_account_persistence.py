@@ -74,11 +74,12 @@ class TestAccountStatePersistence:
         assert restored.account_type == "normal"
         assert restored.world == "302"
         assert restored.last_update is not None
-        assert "Sailing XP" in restored.detail_sensors
-        assert restored.detail_sensors["Sailing XP"]["value"] == 50000
-        assert restored.detail_sensors["Sailing Level"]["value"] == 70
-        assert "Attack XP" in restored.detail_sensors
-        assert restored.detail_sensors["Attack Level"]["value"] == 99
+        assert "Sailing" in restored.detail_sensors
+        assert restored.detail_sensors["Sailing"]["value"] == 70
+        assert restored.detail_sensors["Sailing"]["attributes"]["xp"] == 50000
+        assert "Attack" in restored.detail_sensors
+        assert restored.detail_sensors["Attack"]["value"] == 99
+        assert restored.detail_sensors["Attack"]["attributes"]["xp"] == 13000000
         assert len(restored.inventory) == 1
         assert restored.equipment["HEAD"]["name"] == "Helm"
 
@@ -126,8 +127,9 @@ class TestAccountStorePersistence:
         assert restored is not None
         assert restored.player_name == "PlayerOne"
         assert restored.account_type == "normal"
-        assert "Attack XP" in restored.detail_sensors
-        assert restored.detail_sensors["Attack XP"]["value"] == 1000
+        assert "Attack" in restored.detail_sensors
+        assert restored.detail_sensors["Attack"]["value"] == 70
+        assert restored.detail_sensors["Attack"]["attributes"]["xp"] == 1000
 
     def test_roundtrip_multiple_accounts(self):
         """Multiple accounts roundtrip correctly with separate state."""
@@ -167,5 +169,5 @@ class TestAccountStorePersistence:
 
         restored = store2.get_or_create(None, "RedFuhrbreak")
         assert restored is not None
-        assert restored.detail_sensors["Sailing XP"]["value"] == 50000
-        assert restored.detail_sensors["Sailing Level"]["value"] == 70
+        assert restored.detail_sensors["Sailing"]["value"] == 70
+        assert restored.detail_sensors["Sailing"]["attributes"]["xp"] == 50000

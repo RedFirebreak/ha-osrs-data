@@ -84,14 +84,9 @@ class AccountState:
                 or old.get("level") != new_level
                 or skill_name not in self.skills
             ):
-                self.detail_sensors[f"{skill_name} XP"] = {
-                    "value": new_xp,
-                    "attributes": {"skill": skill_name},
-                    "last_update": now,
-                }
-                self.detail_sensors[f"{skill_name} Level"] = {
+                self.detail_sensors[skill_name] = {
                     "value": new_level,
-                    "attributes": {"skill": skill_name},
+                    "attributes": {"xp": new_xp},
                     "last_update": now,
                 }
 

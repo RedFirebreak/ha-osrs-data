@@ -212,24 +212,15 @@ class TestOsrsEquipmentSensor:
 class TestOsrsAccountDetailSensor:
     """Tests for the per-skill detail sensor."""
 
-    def test_skill_xp_sensor(self):
+    def test_skill_sensor(self):
         entry = _make_entry()
         state = AccountState("hash1", "Player")
         state.update_player_data({
             "skills": {"Attack": {"xp": 737627, "level": 60}},
         })
-        sensor = OsrsAccountDetailSensor(entry, state, "hash1", "Attack XP")
-        assert sensor.native_value == 737627
-        assert sensor.extra_state_attributes["skill"] == "Attack"
-
-    def test_skill_level_sensor(self):
-        entry = _make_entry()
-        state = AccountState("hash1", "Player")
-        state.update_player_data({
-            "skills": {"Attack": {"xp": 737627, "level": 60}},
-        })
-        sensor = OsrsAccountDetailSensor(entry, state, "hash1", "Attack Level")
+        sensor = OsrsAccountDetailSensor(entry, state, "hash1", "Attack")
         assert sensor.native_value == 60
+        assert sensor.extra_state_attributes["xp"] == 737627
 
     def test_unique_id(self):
         entry = _make_entry()
@@ -237,8 +228,8 @@ class TestOsrsAccountDetailSensor:
         state.update_player_data({
             "skills": {"Attack": {"xp": 100, "level": 10}},
         })
-        sensor = OsrsAccountDetailSensor(entry, state, "hash1", "Attack XP")
-        assert "hash1_detail_attack_xp" == sensor.unique_id
+        sensor = OsrsAccountDetailSensor(entry, state, "hash1", "Attack")
+        assert "hash1_detail_attack" == sensor.unique_id
 
     def test_no_dink_in_device_info(self):
         """Ensure no Dink references in device info."""
