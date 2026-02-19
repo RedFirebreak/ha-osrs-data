@@ -92,6 +92,10 @@ class TestBaseParser:
         assert result["inventory"] == []
         assert result["events"] == []
 
+    def test_missing_name_returns_none(self):
+        assert parse({"player": {}}) is None
+        assert parse({"player": {"accountType": "normal"}}) is None
+
 
 # ── Skills parsing ──────────────────────────────────────────────────
 

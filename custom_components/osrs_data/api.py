@@ -234,6 +234,7 @@ class OsrsEventsView(HomeAssistantView):
                 _LOGGER.debug("Dropping duplicate data for %s", account_id)
                 return self.json({"ok": True, "duplicate": True})
 
+            # Use player name as account key (no hash in new format)
             store = entry_data.get(DATA_ACCOUNT_STORE)
             if store is not None:
                 acct = store.get_or_create(None, player_name)

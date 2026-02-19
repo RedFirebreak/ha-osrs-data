@@ -31,7 +31,9 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not player or not isinstance(player, dict):
         return None
 
-    name = player.get("name", "Unknown")
+    name = player.get("name")
+    if not name:
+        return None
     account_type = player.get("accountType", "normal")
     world = player.get("world")
 
