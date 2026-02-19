@@ -1,0 +1,83 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Closest Skill to Level Up Card
+# ──────────────────────────────────────────────────────────────────────
+# Shows the skill that is closest to reaching its next level,
+# with XP remaining, a progress bar, and the relevant icon.
+#
+# Requirements:  Template sensors from custom_helpers/template_sensors.yaml
+# Recommended:   custom:mushroom-template-card (via HACS)
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "📈 Select Player"
+
+  # ── Closest to Level Up — Gauge ─────────────────────────────────────
+  - type: gauge
+    entity: sensor.osrs_closest_to_level_up
+    name: "Closest to Level Up"
+    needle: true
+    severity:
+      green: 75
+      yellow: 40
+      red: 0
+    # NOTE: The gauge shows the progress_percent attribute.
+    # Use a template sensor or card_mod to display the attribute as state.
+
+  # ── Closest to Level Up — Detail ────────────────────────────────────
+  - type: markdown
+    title: "📈 Closest to Level Up"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #0d2137 0%, #1a3a5c 100%);
+          border: 2px solid #00d4aa;
+          border-radius: 12px;
+        }
+        h1 { color: #00d4aa; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set skill = states('sensor.osrs_closest_to_level_up') %}
+      {% set xp_left = state_attr('sensor.osrs_closest_to_level_up', 'xp_remaining') | int(0) %}
+      {% set level = state_attr('sensor.osrs_closest_to_level_up', 'current_level') | int(0) %}
+      {% set pct = state_attr('sensor.osrs_closest_to_level_up', 'progress_percent') | float(0) %}
+
+      {% set skill_icons = {
+        'Attack': '⚔️', 'Hitpoints': '❤️', 'Mining': '⛏️',
+        'Strength': '💪', 'Agility': '🏃', 'Smithing': '🔨',
+        'Defence': '🛡️', 'Herblore': '🌿', 'Fishing': '🐟',
+        'Ranged': '🏹', 'Thieving': '🗝️', 'Cooking': '🍳',
+        'Prayer': '✨', 'Crafting': '✂️', 'Firemaking': '🔥',
+        'Magic': '🔮', 'Fletching': '🪶', 'Woodcutting': '🪓',
+        'Runecraft': '🟣', 'Slayer': '💀', 'Farming': '🌱',
+        'Construction': '🏠', 'Hunter': '🦎'
+      } %}
+      {% set icon = skill_icons.get(skill, '📊') %}
+
+      {% if skill == 'None' or level == 0 %}
+
+      🎉 **All skills are level 99!** Max cape incoming! 🎉
+
+      {% else %}
+
+      <div style="text-align:center; padding:16px;">
+        <span style="font-size:3em;">{{ icon }}</span>
+        <h2 style="color:#00d4aa; margin:8px 0 4px;">{{ skill }}</h2>
+        <p style="color:#aaa; margin:0;">Level <strong style="color:#fff;">{{ level }}</strong> → <strong style="color:#00d4aa;">{{ level + 1 }}</strong></p>
+
+        <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:24px; margin:12px 0; border:1px solid #333;">
+          <div style="background:linear-gradient(90deg, #00d4aa, #00ff88); height:100%; width:{{ pct }}%; transition:width 0.5s; border-radius:8px;"></div>
+        </div>
+
+        <p style="color:#fff; font-size:1.1em; margin:4px 0;">
+          <strong>{{ pct }}%</strong> complete
+        </p>
+        <p style="color:#ff6b6b; font-size:1.2em; margin:4px 0;">
+          <strong>{{ '{:,}'.format(xp_left) }} XP</strong> remaining
+        </p>
+      </div>
+
+      {% endif %}

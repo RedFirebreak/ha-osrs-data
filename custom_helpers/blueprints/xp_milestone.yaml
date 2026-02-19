@@ -1,0 +1,48 @@
+# ──────────────────────────────────────────────────────────────────────
+# Blueprint: OSRS XP Milestone Notification
+# ──────────────────────────────────────────────────────────────────────
+# Fires when the total XP template sensor crosses a milestone threshold.
+# ──────────────────────────────────────────────────────────────────────
+
+blueprint:
+  name: "OSRS XP Milestone Notification"
+  description: >
+    Get notified when the total OSRS XP crosses a configurable threshold
+    (e.g. every 1,000,000 XP). Requires the OSRS Total XP template sensor.
+  domain: automation
+  input:
+    total_xp_sensor:
+      name: Total XP Sensor
+      description: "The OSRS Total XP template sensor"
+      default: sensor.osrs_total_xp
+      selector:
+        entity:
+          domain: sensor
+    xp_milestone:
+      name: XP Milestone
+      description: "Notify when total XP passes this value"
+      default: 1000000
+      selector:
+        number:
+          min: 10000
+          max: 200000000
+          step: 100000
+    notify_service:
+      name: Notification Service
+      description: "The notification service to call"
+      default: notify.persistent_notification
+      selector:
+        text:
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input total_xp_sensor
+    above: !input xp_milestone
+
+action:
+  - service: !input notify_service
+    data:
+      title: "🏆 OSRS XP Milestone!"
+      message: >-
+        Total XP has reached {{ states(trigger.entity_id) | int | filesizeformat }}!
+        Congratulations!

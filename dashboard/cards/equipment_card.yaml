@@ -1,0 +1,122 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Equipment Card
+# ──────────────────────────────────────────────────────────────────────
+# Shows what the player is currently wearing across all equipment slots,
+# laid out to resemble the in-game equipment screen.
+#
+# Requirements:  None (pure Lovelace markdown).
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "🛡️ Select Player"
+
+  # ── Equipment Layout ───────────────────────────────────────────────
+  - type: markdown
+    title: "🛡️ Equipment"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #1a1a2e 0%, #0d1117 50%, #161b22 100%);
+          border: 2px solid #58a6ff;
+          border-radius: 12px;
+        }
+        h1 { color: #58a6ff; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+      {% set eq_entity = 'sensor.osrs_' ~ player ~ '_equipment' %}
+
+      {% macro slot(name, icon) %}
+        {% set item = state_attr(eq_entity, name) or {} %}
+        {% if item and item.name is defined %}
+          {{ icon }} **{{ item.name }}**
+        {% else %}
+          {{ icon }} *Empty*
+        {% endif %}
+      {% endmacro %}
+
+      <table style="width:100%; border-collapse:separate; border-spacing:4px; text-align:center;">
+      <tr>
+        <td></td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          🪖 **HEAD**<br/>
+          {% set h = state_attr(eq_entity, 'HEAD') or {} %}
+          {% if h and h.name is defined %}{{ h.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td></td>
+      </tr>
+      <tr>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          🧣 **CAPE**<br/>
+          {% set c = state_attr(eq_entity, 'CAPE') or {} %}
+          {% if c and c.name is defined %}{{ c.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          📿 **AMULET**<br/>
+          {% set a = state_attr(eq_entity, 'AMULET') or {} %}
+          {% if a and a.name is defined %}{{ a.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          🏹 **AMMO**<br/>
+          {% set am = state_attr(eq_entity, 'AMMO') or {} %}
+          {% if am and am.name is defined %}{{ am.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          ⚔️ **WEAPON**<br/>
+          {% set w = state_attr(eq_entity, 'WEAPON') or {} %}
+          {% if w and w.name is defined %}{{ w.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          👕 **BODY**<br/>
+          {% set b = state_attr(eq_entity, 'BODY') or {} %}
+          {% if b and b.name is defined %}{{ b.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          🛡️ **SHIELD**<br/>
+          {% set s = state_attr(eq_entity, 'SHIELD') or {} %}
+          {% if s and s.name is defined %}{{ s.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          👖 **LEGS**<br/>
+          {% set l = state_attr(eq_entity, 'LEGS') or {} %}
+          {% if l and l.name is defined %}{{ l.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td></td>
+      </tr>
+      <tr>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          🧤 **GLOVES**<br/>
+          {% set g = state_attr(eq_entity, 'GLOVES') or {} %}
+          {% if g and g.name is defined %}{{ g.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          🥾 **BOOTS**<br/>
+          {% set bt = state_attr(eq_entity, 'BOOTS') or {} %}
+          {% if bt and bt.name is defined %}{{ bt.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+        <td style="background:rgba(88,166,255,0.1); border:1px solid #333; border-radius:8px; padding:8px;">
+          💍 **RING**<br/>
+          {% set r = state_attr(eq_entity, 'RING') or {} %}
+          {% if r and r.name is defined %}{{ r.name }}{% else %}<em>Empty</em>{% endif %}
+        </td>
+      </tr>
+      </table>
+
+      ---
+      {% set eq_total = 0 %}
+      {% for slot_name in ['HEAD','CAPE','AMULET','AMMO','WEAPON','BODY','SHIELD','LEGS','GLOVES','BOOTS','RING'] %}
+        {% set item = state_attr(eq_entity, slot_name) or {} %}
+        {% if item and item.gePrice is defined %}
+          {% set eq_total = eq_total + (item.gePrice | int(0)) %}
+        {% endif %}
+      {% endfor %}
+      **Total Equipped GE Value:** {{ '{:,}'.format(eq_total) }} gp

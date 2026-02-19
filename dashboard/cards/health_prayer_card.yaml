@@ -1,0 +1,78 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Health & Prayer Card
+# ──────────────────────────────────────────────────────────────────────
+# Displays current HP and Prayer points with OSRS-themed gauges,
+# progress bars, and icons.  Resembles the in-game orbs.
+#
+# Requirements:  None (pure Lovelace).
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "❤️ Select Player"
+
+  # ── HP & Prayer Bars ───────────────────────────────────────────────
+  - type: markdown
+    title: "❤️ Health & ✨ Prayer"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #2a0a0a 0%, #1a0a2e 100%);
+          border: 2px solid #e94560;
+          border-radius: 12px;
+        }
+        h1 { color: #ff6b6b; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+      {% set hp_entity = 'sensor.osrs_' ~ player ~ '_health' %}
+      {% set pray_entity = 'sensor.osrs_' ~ player ~ '_prayer_points' %}
+
+      {% set hp_cur = state_attr(hp_entity, 'current') | int(0) %}
+      {% set hp_max = state_attr(hp_entity, 'max') | int(1) %}
+      {% set hp_pct = ((hp_cur / hp_max) * 100) | round(0) if hp_max > 0 else 0 %}
+
+      {% set pray_cur = state_attr(pray_entity, 'current') | int(0) %}
+      {% set pray_max = state_attr(pray_entity, 'max') | int(1) %}
+      {% set pray_pct = ((pray_cur / pray_max) * 100) | round(0) if pray_max > 0 else 0 %}
+
+      {% set hp_color = '#00ff00' if hp_pct > 50 else '#ffaa00' if hp_pct > 25 else '#ff0000' %}
+
+      <div style="padding:8px;">
+
+        <!-- HITPOINTS -->
+        <div style="display:flex; align-items:center; margin-bottom:16px;">
+          <span style="font-size:2.5em; margin-right:12px;">❤️</span>
+          <div style="flex:1;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <strong style="color:#ff6b6b; font-size:1.1em;">Hitpoints</strong>
+              <span style="color:#fff; font-size:1.1em;">
+                <strong>{{ hp_cur }}</strong> / {{ hp_max }}
+              </span>
+            </div>
+            <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:20px; border:1px solid #333;">
+              <div style="background:linear-gradient(90deg, #ff0000, {{ hp_color }}); height:100%; width:{{ hp_pct }}%; transition:width 0.5s ease; border-radius:8px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PRAYER -->
+        <div style="display:flex; align-items:center;">
+          <span style="font-size:2.5em; margin-right:12px;">✨</span>
+          <div style="flex:1;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <strong style="color:#7b68ee; font-size:1.1em;">Prayer</strong>
+              <span style="color:#fff; font-size:1.1em;">
+                <strong>{{ pray_cur }}</strong> / {{ pray_max }}
+              </span>
+            </div>
+            <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:20px; border:1px solid #333;">
+              <div style="background:linear-gradient(90deg, #4a0080, #7b68ee); height:100%; width:{{ pray_pct }}%; transition:width 0.5s ease; border-radius:8px;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>

@@ -1,0 +1,239 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Template Sensors
+# ──────────────────────────────────────────────────────────────────────
+# These template sensors compute derived stats from the base OSRS Data
+# sensors. They power the "Closest Skill to Level Up" and "Top 5 Skills
+# to 99" dashboard cards.
+#
+# Replace "playerone" in entity IDs with your actual player slug
+# (lowercase player name, spaces → underscores).
+#
+# Paste into your configuration.yaml or include via packages.
+# ──────────────────────────────────────────────────────────────────────
+
+# OSRS XP table — cumulative XP required for each level (1-99).
+# Level 1 = 0 XP.  These values follow the standard OSRS formula:
+#   XP(L) = floor( sum_{n=1}^{L-1} floor(n + 300 * 2^(n/7)) / 4 )
+
+template:
+  - sensor:
+      # ── Closest Skill to Level Up ────────────────────────────────────
+      - name: "OSRS Closest to Level Up"
+        unique_id: osrs_closest_to_level_up
+        icon: mdi:arrow-up-bold-circle
+        state: >-
+          {% set xp_table = [
+            0, 83, 174, 276, 388, 512, 650, 801, 969, 1154,
+            1358, 1584, 1833, 2107, 2411, 2746, 3115, 3523, 3973, 4470,
+            5018, 5624, 6291, 7028, 7842, 8740, 9730, 10824, 12031, 13363,
+            14833, 16456, 18247, 20224, 22406, 24815, 27473, 30408, 33648, 37224,
+            41171, 45529, 50339, 55649, 61512, 67983, 75127, 83014, 91721, 101333,
+            111945, 123660, 136594, 150872, 166636, 184040, 203254, 224466, 247886, 273742,
+            302288, 333804, 368599, 407015, 449428, 496254, 547953, 605032, 668051, 737627,
+            814445, 899257, 992895, 1096278, 1210421, 1336443, 1475581, 1629200, 1798808, 1986068,
+            2192818, 2421087, 2673114, 2951373, 3258594, 3597792, 3972294, 4385776, 4842295, 5346332,
+            5902831, 6517253, 7195629, 7944614, 8771558, 9684577, 10692629, 11805606, 13034431
+          ] %}
+          {% set ns = namespace(best_skill='None', best_remaining=999999999) %}
+          {% set skills = [
+            'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+            'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+            'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+            'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+            'Hunter', 'Construction'
+          ] %}
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% for skill in skills %}
+            {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+            {% set level = states(entity) | int(0) %}
+            {% set xp = state_attr(entity, 'xp') | int(0) %}
+            {% if level > 0 and level < 99 %}
+              {% set next_xp = xp_table[level] if level < 99 else 200000000 %}
+              {% set remaining = next_xp - xp %}
+              {% if remaining < ns.best_remaining %}
+                {% set ns.best_remaining = remaining %}
+                {% set ns.best_skill = skill %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.best_skill }}
+        attributes:
+          xp_remaining: >-
+            {% set xp_table = [
+              0, 83, 174, 276, 388, 512, 650, 801, 969, 1154,
+              1358, 1584, 1833, 2107, 2411, 2746, 3115, 3523, 3973, 4470,
+              5018, 5624, 6291, 7028, 7842, 8740, 9730, 10824, 12031, 13363,
+              14833, 16456, 18247, 20224, 22406, 24815, 27473, 30408, 33648, 37224,
+              41171, 45529, 50339, 55649, 61512, 67983, 75127, 83014, 91721, 101333,
+              111945, 123660, 136594, 150872, 166636, 184040, 203254, 224466, 247886, 273742,
+              302288, 333804, 368599, 407015, 449428, 496254, 547953, 605032, 668051, 737627,
+              814445, 899257, 992895, 1096278, 1210421, 1336443, 1475581, 1629200, 1798808, 1986068,
+              2192818, 2421087, 2673114, 2951373, 3258594, 3597792, 3972294, 4385776, 4842295, 5346332,
+              5902831, 6517253, 7195629, 7944614, 8771558, 9684577, 10692629, 11805606, 13034431
+            ] %}
+            {% set ns = namespace(best_remaining=999999999) %}
+            {% set skills = [
+              'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+              'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+              'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+              'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+              'Hunter', 'Construction'
+            ] %}
+            {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+            {% for skill in skills %}
+              {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+              {% set level = states(entity) | int(0) %}
+              {% set xp = state_attr(entity, 'xp') | int(0) %}
+              {% if level > 0 and level < 99 %}
+                {% set next_xp = xp_table[level] if level < 99 else 200000000 %}
+                {% set remaining = next_xp - xp %}
+                {% if remaining < ns.best_remaining %}
+                  {% set ns.best_remaining = remaining %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.best_remaining }}
+          current_level: >-
+            {% set xp_table = [
+              0, 83, 174, 276, 388, 512, 650, 801, 969, 1154,
+              1358, 1584, 1833, 2107, 2411, 2746, 3115, 3523, 3973, 4470,
+              5018, 5624, 6291, 7028, 7842, 8740, 9730, 10824, 12031, 13363,
+              14833, 16456, 18247, 20224, 22406, 24815, 27473, 30408, 33648, 37224,
+              41171, 45529, 50339, 55649, 61512, 67983, 75127, 83014, 91721, 101333,
+              111945, 123660, 136594, 150872, 166636, 184040, 203254, 224466, 247886, 273742,
+              302288, 333804, 368599, 407015, 449428, 496254, 547953, 605032, 668051, 737627,
+              814445, 899257, 992895, 1096278, 1210421, 1336443, 1475581, 1629200, 1798808, 1986068,
+              2192818, 2421087, 2673114, 2951373, 3258594, 3597792, 3972294, 4385776, 4842295, 5346332,
+              5902831, 6517253, 7195629, 7944614, 8771558, 9684577, 10692629, 11805606, 13034431
+            ] %}
+            {% set ns = namespace(best_skill='None', best_remaining=999999999, best_level=0) %}
+            {% set skills = [
+              'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+              'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+              'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+              'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+              'Hunter', 'Construction'
+            ] %}
+            {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+            {% for skill in skills %}
+              {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+              {% set level = states(entity) | int(0) %}
+              {% set xp = state_attr(entity, 'xp') | int(0) %}
+              {% if level > 0 and level < 99 %}
+                {% set next_xp = xp_table[level] if level < 99 else 200000000 %}
+                {% set remaining = next_xp - xp %}
+                {% if remaining < ns.best_remaining %}
+                  {% set ns.best_remaining = remaining %}
+                  {% set ns.best_level = level %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.best_level }}
+          progress_percent: >-
+            {% set xp_table = [
+              0, 83, 174, 276, 388, 512, 650, 801, 969, 1154,
+              1358, 1584, 1833, 2107, 2411, 2746, 3115, 3523, 3973, 4470,
+              5018, 5624, 6291, 7028, 7842, 8740, 9730, 10824, 12031, 13363,
+              14833, 16456, 18247, 20224, 22406, 24815, 27473, 30408, 33648, 37224,
+              41171, 45529, 50339, 55649, 61512, 67983, 75127, 83014, 91721, 101333,
+              111945, 123660, 136594, 150872, 166636, 184040, 203254, 224466, 247886, 273742,
+              302288, 333804, 368599, 407015, 449428, 496254, 547953, 605032, 668051, 737627,
+              814445, 899257, 992895, 1096278, 1210421, 1336443, 1475581, 1629200, 1798808, 1986068,
+              2192818, 2421087, 2673114, 2951373, 3258594, 3597792, 3972294, 4385776, 4842295, 5346332,
+              5902831, 6517253, 7195629, 7944614, 8771558, 9684577, 10692629, 11805606, 13034431
+            ] %}
+            {% set ns = namespace(best_remaining=999999999, best_level=0, best_xp=0) %}
+            {% set skills = [
+              'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+              'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+              'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+              'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+              'Hunter', 'Construction'
+            ] %}
+            {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+            {% for skill in skills %}
+              {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+              {% set level = states(entity) | int(0) %}
+              {% set xp = state_attr(entity, 'xp') | int(0) %}
+              {% if level > 0 and level < 99 %}
+                {% set next_xp = xp_table[level] if level < 99 else 200000000 %}
+                {% set remaining = next_xp - xp %}
+                {% if remaining < ns.best_remaining %}
+                  {% set ns.best_remaining = remaining %}
+                  {% set ns.best_level = level %}
+                  {% set ns.best_xp = xp %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {% if ns.best_level > 0 and ns.best_level < 99 %}
+              {% set current_level_xp = xp_table[ns.best_level - 1] %}
+              {% set next_level_xp = xp_table[ns.best_level] %}
+              {% set total_needed = next_level_xp - current_level_xp %}
+              {% set gained = ns.best_xp - current_level_xp %}
+              {{ ((gained / total_needed) * 100) | round(1) if total_needed > 0 else 0 }}
+            {% else %}
+              0
+            {% endif %}
+
+      # ── Total Level ──────────────────────────────────────────────────
+      - name: "OSRS Total Level"
+        unique_id: osrs_total_level
+        icon: mdi:sigma
+        unit_of_measurement: ""
+        state: >-
+          {% set skills = [
+            'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+            'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+            'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+            'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+            'Hunter', 'Construction'
+          ] %}
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% set ns = namespace(total=0) %}
+          {% for skill in skills %}
+            {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+            {% set level = states(entity) | int(0) %}
+            {% set ns.total = ns.total + level %}
+          {% endfor %}
+          {{ ns.total }}
+
+      # ── Total XP ─────────────────────────────────────────────────────
+      - name: "OSRS Total XP"
+        unique_id: osrs_total_xp
+        icon: mdi:star-circle
+        unit_of_measurement: "xp"
+        state: >-
+          {% set skills = [
+            'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+            'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+            'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+            'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+            'Hunter', 'Construction'
+          ] %}
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% set ns = namespace(total=0) %}
+          {% for skill in skills %}
+            {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+            {% set xp = state_attr(entity, 'xp') | int(0) %}
+            {% set ns.total = ns.total + xp %}
+          {% endfor %}
+          {{ ns.total }}
+
+      # ── Combat Level ─────────────────────────────────────────────────
+      - name: "OSRS Combat Level"
+        unique_id: osrs_combat_level
+        icon: mdi:sword-cross
+        state: >-
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% set att = states('sensor.osrs_' ~ player ~ '_attack_level') | int(1) %}
+          {% set str = states('sensor.osrs_' ~ player ~ '_strength_level') | int(1) %}
+          {% set def = states('sensor.osrs_' ~ player ~ '_defence_level') | int(1) %}
+          {% set hp  = states('sensor.osrs_' ~ player ~ '_hitpoints_level') | int(10) %}
+          {% set pray = states('sensor.osrs_' ~ player ~ '_prayer_level') | int(1) %}
+          {% set rng = states('sensor.osrs_' ~ player ~ '_ranged_level') | int(1) %}
+          {% set mag = states('sensor.osrs_' ~ player ~ '_magic_level') | int(1) %}
+          {% set base = ((def + hp + (pray / 2) | int) / 4) | round(2) %}
+          {% set melee = (att + str) * 0.325 %}
+          {% set range = rng * 1.5 * 0.325 %}
+          {% set mage = mag * 1.5 * 0.325 %}
+          {{ (base + [melee, range, mage] | max) | round(2) }}

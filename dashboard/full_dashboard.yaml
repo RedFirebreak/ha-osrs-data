@@ -1,0 +1,305 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Full Dashboard
+# ──────────────────────────────────────────────────────────────────────
+# Assembles all OSRS dashboard cards into a single, complete Lovelace
+# dashboard.  Copy this into your HA dashboard YAML editor, or use
+# individual cards from the cards/ folder for a custom layout.
+#
+# Prerequisites:
+#   1. custom_helpers/input_select_player.yaml  → configuration.yaml
+#   2. custom_helpers/template_sensors.yaml     → configuration.yaml
+#   3. OSRS Data integration installed & paired
+#
+# Optional HACS cards for extra polish:
+#   - card-mod           (custom styling)
+#   - mushroom           (template cards)
+#   - bar-card           (progress bars)
+# ──────────────────────────────────────────────────────────────────────
+
+title: "⚔️ OSRS Dashboard"
+icon: mdi:sword
+path: osrs-dashboard
+
+type: custom:masonry-layout
+# Falls back to standard masonry if custom:masonry-layout is unavailable.
+
+cards:
+  # ════════════════════════════════════════════════════════════════════
+  # ROW 1: Player Overview + Health/Prayer
+  # ════════════════════════════════════════════════════════════════════
+  - type: horizontal-stack
+    cards:
+      # ── Player Overview (left) ───────────────────────────────────────
+      - type: vertical-stack
+        cards:
+          - type: entities
+            entities:
+              - entity: input_select.osrs_player_selector
+                name: "👤 Select Player"
+
+          - type: markdown
+            title: "👤 Player Overview"
+            card_mod:
+              style: |
+                ha-card {
+                  background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+                  border: 2px solid #ffde00;
+                  border-radius: 12px;
+                }
+            content: >-
+              {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+              {% set info = 'sensor.osrs_' ~ player ~ '_player_info' %}
+              {% set name = states(info) | default('Unknown') %}
+              {% set world = state_attr(info, 'world') | default('?') %}
+              {% set acct = state_attr(info, 'account_type') | default('normal') %}
+              {% set type_badges = {'normal':'🟢','ironman':'⚫','hardcore_ironman':'🔴','ultimate_ironman':'⚪','group_ironman':'🟡'} %}
+
+              <div style="text-align:center; padding:8px;">
+                <h2 style="color:#ffde00; margin:0;">{{ type_badges.get(acct,'🔵') }} {{ name }}</h2>
+                <p style="color:#aaa;">{{ acct | capitalize }} · World {{ world }}</p>
+              </div>
+
+              | | |
+              |:--|--:|
+              | ⚔️ **Combat** | **{{ states('sensor.osrs_combat_level') }}** |
+              | 📊 **Total Level** | **{{ states('sensor.osrs_total_level') }}** |
+              | ⭐ **Total XP** | **{{ '{:,}'.format(states('sensor.osrs_total_xp') | int(0)) }}** |
+
+      # ── Health & Prayer (right) ─────────────────────────────────────
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            title: "❤️ Health & ✨ Prayer"
+            card_mod:
+              style: |
+                ha-card {
+                  background: linear-gradient(135deg, #2a0a0a 0%, #1a0a2e 100%);
+                  border: 2px solid #e94560;
+                  border-radius: 12px;
+                }
+            content: >-
+              {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+              {% set hp = 'sensor.osrs_' ~ player ~ '_health' %}
+              {% set pray = 'sensor.osrs_' ~ player ~ '_prayer_points' %}
+              {% set hp_cur = state_attr(hp, 'current') | int(0) %}
+              {% set hp_max = state_attr(hp, 'max') | int(1) %}
+              {% set hp_pct = ((hp_cur / hp_max) * 100) | round(0) if hp_max > 0 else 0 %}
+              {% set pray_cur = state_attr(pray, 'current') | int(0) %}
+              {% set pray_max = state_attr(pray, 'max') | int(1) %}
+              {% set pray_pct = ((pray_cur / pray_max) * 100) | round(0) if pray_max > 0 else 0 %}
+              {% set hp_color = '#00ff00' if hp_pct > 50 else '#ffaa00' if hp_pct > 25 else '#ff0000' %}
+
+              <div style="padding:8px;">
+                <div style="display:flex; align-items:center; margin-bottom:16px;">
+                  <span style="font-size:2.5em; margin-right:12px;">❤️</span>
+                  <div style="flex:1;">
+                    <div style="display:flex; justify-content:space-between;">
+                      <strong style="color:#ff6b6b;">Hitpoints</strong>
+                      <span style="color:#fff;"><strong>{{ hp_cur }}</strong> / {{ hp_max }}</span>
+                    </div>
+                    <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:20px; border:1px solid #333;">
+                      <div style="background:linear-gradient(90deg, #ff0000, {{ hp_color }}); height:100%; width:{{ hp_pct }}%; border-radius:8px;"></div>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center;">
+                  <span style="font-size:2.5em; margin-right:12px;">✨</span>
+                  <div style="flex:1;">
+                    <div style="display:flex; justify-content:space-between;">
+                      <strong style="color:#7b68ee;">Prayer</strong>
+                      <span style="color:#fff;"><strong>{{ pray_cur }}</strong> / {{ pray_max }}</span>
+                    </div>
+                    <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:20px; border:1px solid #333;">
+                      <div style="background:linear-gradient(90deg, #4a0080, #7b68ee); height:100%; width:{{ pray_pct }}%; border-radius:8px;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+  # ════════════════════════════════════════════════════════════════════
+  # ROW 2: Closest to Level Up + Top 5 Skills to 99
+  # ════════════════════════════════════════════════════════════════════
+  - type: horizontal-stack
+    cards:
+      # ── Closest to Level Up ──────────────────────────────────────────
+      - type: markdown
+        title: "📈 Closest to Level Up"
+        card_mod:
+          style: |
+            ha-card {
+              background: linear-gradient(135deg, #0d2137 0%, #1a3a5c 100%);
+              border: 2px solid #00d4aa;
+              border-radius: 12px;
+            }
+        content: >-
+          {% set skill = states('sensor.osrs_closest_to_level_up') %}
+          {% set xp_left = state_attr('sensor.osrs_closest_to_level_up', 'xp_remaining') | int(0) %}
+          {% set level = state_attr('sensor.osrs_closest_to_level_up', 'current_level') | int(0) %}
+          {% set pct = state_attr('sensor.osrs_closest_to_level_up', 'progress_percent') | float(0) %}
+          {% set icons = {'Attack':'⚔️','Hitpoints':'❤️','Mining':'⛏️','Strength':'💪','Agility':'🏃','Smithing':'🔨','Defence':'🛡️','Herblore':'🌿','Fishing':'🐟','Ranged':'🏹','Thieving':'🗝️','Cooking':'🍳','Prayer':'✨','Crafting':'✂️','Firemaking':'🔥','Magic':'🔮','Fletching':'🪶','Woodcutting':'🪓','Runecraft':'🟣','Slayer':'💀','Farming':'🌱','Construction':'🏠','Hunter':'🦎'} %}
+
+          {% if skill == 'None' or level == 0 %}
+          🎉 **All skills are level 99!**
+          {% else %}
+          <div style="text-align:center; padding:16px;">
+            <span style="font-size:3em;">{{ icons.get(skill, '📊') }}</span>
+            <h2 style="color:#00d4aa; margin:8px 0;">{{ skill }}</h2>
+            <p style="color:#aaa;">Level <strong style="color:#fff;">{{ level }}</strong> → <strong style="color:#00d4aa;">{{ level + 1 }}</strong></p>
+            <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:24px; margin:12px 0; border:1px solid #333;">
+              <div style="background:linear-gradient(90deg, #00d4aa, #00ff88); height:100%; width:{{ pct }}%; border-radius:8px;"></div>
+            </div>
+            <p style="color:#fff;"><strong>{{ pct }}%</strong> complete</p>
+            <p style="color:#ff6b6b; font-size:1.2em;"><strong>{{ '{:,}'.format(xp_left) }} XP</strong> remaining</p>
+          </div>
+          {% endif %}
+
+      # ── Top 5 Skills to 99 ──────────────────────────────────────────
+      - type: markdown
+        title: "🏆 Top 5 Skills to 99"
+        card_mod:
+          style: |
+            ha-card {
+              background: linear-gradient(135deg, #1a2a0a 0%, #2a3a1a 100%);
+              border: 2px solid #7cfc00;
+              border-radius: 12px;
+            }
+        content: >-
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% set xp99 = 13034431 %}
+          {% set icons = {'Attack':'⚔️','Hitpoints':'❤️','Mining':'⛏️','Strength':'💪','Agility':'🏃','Smithing':'🔨','Defence':'🛡️','Herblore':'🌿','Fishing':'🐟','Ranged':'🏹','Thieving':'🗝️','Cooking':'🍳','Prayer':'✨','Crafting':'✂️','Firemaking':'🔥','Magic':'🔮','Fletching':'🪶','Woodcutting':'🪓','Runecraft':'🟣','Slayer':'💀','Farming':'🌱','Construction':'🏠','Hunter':'🦎'} %}
+          {% set skills = ['Attack','Defence','Strength','Hitpoints','Ranged','Prayer','Magic','Cooking','Woodcutting','Fletching','Fishing','Firemaking','Crafting','Smithing','Mining','Herblore','Agility','Thieving','Slayer','Farming','Runecraft','Hunter','Construction'] %}
+          {% set ns = namespace(data=[]) %}
+          {% for s in skills %}
+            {% set e = 'sensor.osrs_' ~ player ~ '_' ~ s | lower ~ '_level' %}
+            {% set lv = states(e) | int(0) %}
+            {% set xp = state_attr(e, 'xp') | int(0) %}
+            {% if lv > 0 and lv < 99 %}
+              {% set ns.data = ns.data + [{'n':s,'l':lv,'x':xp,'p':((xp/xp99)*100)|round(1)}] %}
+            {% endif %}
+          {% endfor %}
+          {% set top = (ns.data | sort(attribute='l', reverse=true))[:5] %}
+
+          {% if top | length == 0 %}
+          🎉 **All skills are 99!**
+          {% else %}
+          {% for s in top %}
+            {% set bc = '#7cfc00' if s.p > 75 else '#ffde00' if s.p > 50 else '#ff8c00' if s.p > 25 else '#ff4444' %}
+            <div style="margin-bottom:10px;">
+              <div style="display:flex; justify-content:space-between;">
+                <span>{{ icons.get(s.n,'📊') }} <strong>{{ s.n }}</strong></span>
+                <span style="color:#aaa;">Lvl <strong style="color:#fff;">{{ s.l }}</strong></span>
+              </div>
+              <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:14px; border:1px solid #333; position:relative;">
+                <div style="background:{{ bc }}; height:100%; width:{{ s.p }}%; border-radius:8px;"></div>
+                <span style="position:absolute; top:0; right:4px; font-size:0.65em; color:#fff; line-height:14px;">{{ s.p }}%</span>
+              </div>
+              <div style="text-align:right; color:#666; font-size:0.7em;">{{ '{:,}'.format(xp99 - s.x) }} XP to 99</div>
+            </div>
+          {% endfor %}
+          {% endif %}
+
+  # ════════════════════════════════════════════════════════════════════
+  # ROW 3: Skills Grid
+  # ════════════════════════════════════════════════════════════════════
+  - type: markdown
+    title: "⚔️ All Skills"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+          border: 2px solid #e94560;
+          border-radius: 12px;
+        }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+      {% set skills = [
+        ('Attack','⚔️'), ('Hitpoints','❤️'), ('Mining','⛏️'),
+        ('Strength','💪'), ('Agility','🏃'), ('Smithing','🔨'),
+        ('Defence','🛡️'), ('Herblore','🌿'), ('Fishing','🐟'),
+        ('Ranged','🏹'), ('Thieving','🗝️'), ('Cooking','🍳'),
+        ('Prayer','✨'), ('Crafting','✂️'), ('Firemaking','🔥'),
+        ('Magic','🔮'), ('Fletching','🪶'), ('Woodcutting','🪓'),
+        ('Runecraft','🟣'), ('Slayer','💀'), ('Farming','🌱'),
+        ('Construction','🏠'), ('Hunter','🦎')
+      ] %}
+
+      <table style="width:100%; border-collapse:collapse;">
+      {% for row in range(0, skills | length, 3) %}
+      <tr>
+      {% for i in range(row, [row+3, skills | length] | min) %}
+        {% set s = skills[i] %}
+        {% set e = 'sensor.osrs_' ~ player ~ '_' ~ s[0] | lower ~ '_level' %}
+        {% set lv = states(e) | int(0) %}
+        {% set xp = state_attr(e, 'xp') | int(0) %}
+        {% set c = '#ffde00' if lv >= 99 else '#ffffff' %}
+        <td style="text-align:center; padding:6px; background:rgba(0,0,0,0.3); border:1px solid #333; border-radius:6px;">
+          <span style="font-size:1.2em;">{{ s[1] }}</span><br/>
+          <span style="color:#aaa; font-size:0.75em;">{{ s[0] }}</span><br/>
+          <strong style="color:{{ c }}; font-size:1.3em;">{{ lv }}</strong><br/>
+          <span style="color:#888; font-size:0.65em;">{{ '{:,}'.format(xp) }} xp</span>
+        </td>
+      {% endfor %}
+      </tr>
+      {% endfor %}
+      </table>
+
+  # ════════════════════════════════════════════════════════════════════
+  # ROW 4: Inventory + Equipment
+  # ════════════════════════════════════════════════════════════════════
+  - type: horizontal-stack
+    cards:
+      # ── Inventory ────────────────────────────────────────────────────
+      - type: markdown
+        title: "🎒 Inventory"
+        card_mod:
+          style: |
+            ha-card {
+              background: linear-gradient(135deg, #2d1b00 0%, #4a2c00 100%);
+              border: 2px solid #8b6914;
+              border-radius: 12px;
+            }
+        content: >-
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% set inv = 'sensor.osrs_' ~ player ~ '_inventory' %}
+          {% set items = state_attr(inv, 'items') or [] %}
+          {% set used = state_attr(inv, 'slots_used') | int(0) %}
+
+          **{{ used }} / 28 slots**
+
+          {% if items | length == 0 %}
+          *Empty* 🕳️
+          {% else %}
+          | Item | Qty | GE |
+          |:-----|:---:|---:|
+          {% for i in items %}
+          | {{ i.name }} | {{ i.quantity }} | {{ '{:,}'.format(i.gePrice | int(0)) }} |
+          {% endfor %}
+          {% endif %}
+
+      # ── Equipment ────────────────────────────────────────────────────
+      - type: markdown
+        title: "🛡️ Equipment"
+        card_mod:
+          style: |
+            ha-card {
+              background: linear-gradient(135deg, #1a1a2e 0%, #161b22 100%);
+              border: 2px solid #58a6ff;
+              border-radius: 12px;
+            }
+        content: >-
+          {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+          {% set eq = 'sensor.osrs_' ~ player ~ '_equipment' %}
+
+          {% set slots = [
+            ('HEAD','🪖'), ('CAPE','🧣'), ('AMULET','📿'),
+            ('WEAPON','⚔️'), ('BODY','👕'), ('SHIELD','🛡️'),
+            ('LEGS','👖'), ('GLOVES','🧤'), ('BOOTS','🥾'),
+            ('RING','💍'), ('AMMO','🏹')
+          ] %}
+
+          | Slot | Item |
+          |:-----|:-----|
+          {% for s in slots %}
+            {% set item = state_attr(eq, s[0]) or {} %}
+          | {{ s[1] }} **{{ s[0] }}** | {% if item and item.name is defined %}{{ item.name }}{% else %}*Empty*{% endif %} |
+          {% endfor %}

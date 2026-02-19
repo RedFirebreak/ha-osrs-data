@@ -1,0 +1,86 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Player Overview Card
+# ──────────────────────────────────────────────────────────────────────
+# A single summary card showing key player info: name, combat level,
+# world, account type, total level, HP/prayer status, location, and
+# spellbook — all in one glance.
+#
+# Requirements:  Template sensors from custom_helpers/template_sensors.yaml
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "👤 Select Player"
+
+  # ── Player Overview ────────────────────────────────────────────────
+  - type: markdown
+    title: "👤 Player Overview"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+          border: 2px solid #ffde00;
+          border-radius: 12px;
+        }
+        h1 { color: #ffde00; text-shadow: 2px 2px 4px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+      {% set info = 'sensor.osrs_' ~ player ~ '_player_info' %}
+      {% set hp = 'sensor.osrs_' ~ player ~ '_health' %}
+      {% set pray = 'sensor.osrs_' ~ player ~ '_prayer_points' %}
+      {% set loc = 'sensor.osrs_' ~ player ~ '_location' %}
+      {% set spell = 'sensor.osrs_' ~ player ~ '_spellbook' %}
+
+      {% set name = states(info) | default('Unknown') %}
+      {% set world = state_attr(info, 'world') | default('?') %}
+      {% set acct_type = state_attr(info, 'account_type') | default('normal') %}
+      {% set combat = states('sensor.osrs_combat_level') | default('?') %}
+      {% set total = states('sensor.osrs_total_level') | default('?') %}
+      {% set total_xp = states('sensor.osrs_total_xp') | default('0') | int(0) %}
+
+      {% set hp_cur = state_attr(hp, 'current') | int(0) %}
+      {% set hp_max = state_attr(hp, 'max') | int(1) %}
+      {% set pray_cur = state_attr(pray, 'current') | int(0) %}
+      {% set pray_max = state_attr(pray, 'max') | int(1) %}
+
+      {% set loc_x = state_attr(loc, 'x') | default(0) %}
+      {% set loc_y = state_attr(loc, 'y') | default(0) %}
+      {% set spellbook = states(spell) | default('Unknown') %}
+      {% set last_update = state_attr(info, 'last_update') | default('Never') %}
+
+      {% set type_badges = {
+        'normal': '🟢', 'ironman': '⚫', 'hardcore_ironman': '🔴',
+        'ultimate_ironman': '⚪', 'group_ironman': '🟡'
+      } %}
+      {% set badge = type_badges.get(acct_type, '🔵') %}
+
+      <div style="text-align:center; padding:8px;">
+        <h2 style="color:#ffde00; margin:0; font-size:1.8em; text-shadow:2px 2px 4px #000;">
+          {{ badge }} {{ name }}
+        </h2>
+        <p style="color:#aaa; margin:4px 0;">
+          {{ acct_type | capitalize }} · World {{ world }}
+        </p>
+      </div>
+
+      ---
+
+      | | |
+      |:--|--:|
+      | ⚔️ **Combat Level** | **{{ combat }}** |
+      | 📊 **Total Level** | **{{ total }}** |
+      | ⭐ **Total XP** | **{{ '{:,}'.format(total_xp) }}** |
+      | ❤️ **HP** | **{{ hp_cur }}** / {{ hp_max }} |
+      | ✨ **Prayer** | **{{ pray_cur }}** / {{ pray_max }} |
+      | 📍 **Location** | {{ loc_x }}, {{ loc_y }} |
+      | 📖 **Spellbook** | {{ spellbook | capitalize }} |
+
+      ---
+
+      <p style="color:#666; font-size:0.8em; text-align:center;">
+        Last update: {{ last_update }}
+      </p>

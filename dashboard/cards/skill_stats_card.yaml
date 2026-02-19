@@ -1,0 +1,90 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Skill/Stats Card
+# ──────────────────────────────────────────────────────────────────────
+# Displays all 23 OSRS skills in a grid styled like the in-game
+# stats interface.  Uses OSRS Wiki skill icons and the player
+# selector input_select.
+#
+# Requirements:  None (pure Lovelace markdown + entities).
+# Recommended:   custom:mushroom-template-card (via HACS) for polish.
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "⚔️ Select Player"
+
+  # ── Total Level + Combat ────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.osrs_total_level
+        name: "Total Level"
+        icon: mdi:sigma
+      - type: entity
+        entity: sensor.osrs_combat_level
+        name: "Combat Level"
+        icon: mdi:sword-cross
+
+  # ── Skills Grid ────────────────────────────────────────────────────
+  - type: markdown
+    title: "⚔️ Skills"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+          border: 2px solid #e94560;
+          border-radius: 12px;
+        }
+        h1 { color: #ffde00; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+
+      {% set skills = [
+        ('Attack',       '⚔️',  'https://oldschool.runescape.wiki/images/Attack_icon.png'),
+        ('Hitpoints',    '❤️',  'https://oldschool.runescape.wiki/images/Hitpoints_icon.png'),
+        ('Mining',       '⛏️',  'https://oldschool.runescape.wiki/images/Mining_icon.png'),
+        ('Strength',     '💪',  'https://oldschool.runescape.wiki/images/Strength_icon.png'),
+        ('Agility',      '🏃',  'https://oldschool.runescape.wiki/images/Agility_icon.png'),
+        ('Smithing',     '🔨',  'https://oldschool.runescape.wiki/images/Smithing_icon.png'),
+        ('Defence',      '🛡️',  'https://oldschool.runescape.wiki/images/Defence_icon.png'),
+        ('Herblore',     '🌿',  'https://oldschool.runescape.wiki/images/Herblore_icon.png'),
+        ('Fishing',      '🐟',  'https://oldschool.runescape.wiki/images/Fishing_icon.png'),
+        ('Ranged',       '🏹',  'https://oldschool.runescape.wiki/images/Ranged_icon.png'),
+        ('Thieving',     '🗝️',  'https://oldschool.runescape.wiki/images/Thieving_icon.png'),
+        ('Cooking',      '🍳',  'https://oldschool.runescape.wiki/images/Cooking_icon.png'),
+        ('Prayer',       '✨',  'https://oldschool.runescape.wiki/images/Prayer_icon.png'),
+        ('Crafting',     '✂️',  'https://oldschool.runescape.wiki/images/Crafting_icon.png'),
+        ('Firemaking',   '🔥',  'https://oldschool.runescape.wiki/images/Firemaking_icon.png'),
+        ('Magic',        '🔮',  'https://oldschool.runescape.wiki/images/Magic_icon.png'),
+        ('Fletching',    '🪶',  'https://oldschool.runescape.wiki/images/Fletching_icon.png'),
+        ('Woodcutting',  '🪓',  'https://oldschool.runescape.wiki/images/Woodcutting_icon.png'),
+        ('Runecraft',    '🟣',  'https://oldschool.runescape.wiki/images/Runecraft_icon.png'),
+        ('Slayer',       '💀',  'https://oldschool.runescape.wiki/images/Slayer_icon.png'),
+        ('Farming',      '🌱',  'https://oldschool.runescape.wiki/images/Farming_icon.png'),
+        ('Construction', '🏠',  'https://oldschool.runescape.wiki/images/Construction_icon.png'),
+        ('Hunter',       '🦎',  'https://oldschool.runescape.wiki/images/Hunter_icon.png')
+      ] %}
+
+      <table style="width:100%; border-collapse:collapse; font-family:'RuneScape UF',monospace;">
+      {% for row in range(0, skills | length, 3) %}
+      <tr>
+      {% for i in range(row, [row+3, skills | length] | min) %}
+        {% set skill = skills[i] %}
+        {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill[0] | lower ~ '_level' %}
+        {% set level = states(entity) | int(0) %}
+        {% set xp = state_attr(entity, 'xp') | int(0) %}
+        {% set color = '#ffde00' if level >= 99 else '#ffffff' %}
+        <td style="text-align:center; padding:6px 4px; background:rgba(0,0,0,0.3); border:1px solid #333; border-radius:6px; margin:2px;">
+          <span style="font-size:1.2em;">{{ skill[1] }}</span><br/>
+          <span style="color:#aaa; font-size:0.75em;">{{ skill[0] }}</span><br/>
+          <strong style="color:{{ color }}; font-size:1.3em;">{{ level }}</strong><br/>
+          <span style="color:#888; font-size:0.65em;">{{ '{:,}'.format(xp) }} xp</span>
+        </td>
+      {% endfor %}
+      </tr>
+      {% endfor %}
+      </table>

@@ -1,0 +1,54 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Inventory Card
+# ──────────────────────────────────────────────────────────────────────
+# Displays the player's inventory in a grid layout with item icons
+# from the RuneLite cache, quantities, and GE prices.
+#
+# Requirements:  None (pure Lovelace markdown).
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "🎒 Select Player"
+
+  # ── Inventory Grid ─────────────────────────────────────────────────
+  - type: markdown
+    title: "🎒 Inventory"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #2d1b00 0%, #4a2c00 50%, #3d2200 100%);
+          border: 2px solid #8b6914;
+          border-radius: 12px;
+        }
+        h1 { color: #ffde00; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+      {% set inv_entity = 'sensor.osrs_' ~ player ~ '_inventory' %}
+      {% set items = state_attr(inv_entity, 'items') or [] %}
+      {% set slots_used = state_attr(inv_entity, 'slots_used') | int(0) %}
+      {% set slots_total = state_attr(inv_entity, 'slots_total') | int(28) %}
+
+      **{{ slots_used }} / {{ slots_total }} slots used**
+
+      {% if items | length == 0 %}
+
+      *Inventory is empty* 🕳️
+
+      {% else %}
+
+      | Item | Qty | GE Price |
+      |:-----|:---:|--------:|
+      {% for item in items %}
+      | {{ item.name | default('Unknown') }} | {{ item.quantity | default(1) }} | {{ '{:,}'.format(item.gePrice | default(0)) }} gp |
+      {% endfor %}
+
+      ---
+
+      **Total GE Value:** {{ '{:,}'.format(items | map(attribute='gePrice') | map('default', 0) | map('int') | sum) }} gp
+
+      {% endif %}

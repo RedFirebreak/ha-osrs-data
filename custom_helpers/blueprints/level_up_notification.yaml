@@ -1,0 +1,45 @@
+# ──────────────────────────────────────────────────────────────────────
+# Blueprint: OSRS Level-Up Notification
+# ──────────────────────────────────────────────────────────────────────
+# Sends a notification when any OSRS skill sensor increases in level.
+# Import via Settings → Automations → Blueprints → Import Blueprint.
+# ──────────────────────────────────────────────────────────────────────
+
+blueprint:
+  name: "OSRS Level-Up Notification"
+  description: >
+    Get notified when a selected OSRS skill sensor detects a level increase.
+    Fires a mobile notification with the new level and skill name.
+  domain: automation
+  input:
+    skill_sensor:
+      name: Skill Level Sensor
+      description: "The OSRS skill level sensor to monitor (e.g. sensor.osrs_playerone_attack_level)"
+      selector:
+        entity:
+          integration: osrs_data
+          domain: sensor
+    notify_service:
+      name: Notification Service
+      description: "The notification service to use (e.g. notify.mobile_app_my_phone)"
+      default: notify.persistent_notification
+      selector:
+        text:
+
+trigger:
+  - platform: state
+    entity_id: !input skill_sensor
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.state | int(0) > trigger.from_state.state | int(0) }}
+
+action:
+  - service: !input notify_service
+    data:
+      title: "🎉 OSRS Level Up!"
+      message: >-
+        {{ trigger.to_state.attributes.friendly_name | default(trigger.to_state.name) }}
+        is now level {{ trigger.to_state.state }}!
+        (was {{ trigger.from_state.state }})

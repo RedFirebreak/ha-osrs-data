@@ -174,6 +174,46 @@ automation:
 
 See `samples/runelite-post-request.md` for a full example of the payload sent by the RuneLite plugin.
 
+## Dashboard
+
+Pre-built Lovelace dashboard cards are included for a full OSRS monitoring experience.
+
+### Available Cards
+
+| Card | Description |
+|------|-------------|
+| **Player Overview** | Name, combat level, total level, world, account type |
+| **Skills Grid** | All 23 skills with levels and XP in a styled grid |
+| **Health & Prayer** | HP and prayer bars with OSRS-themed colors |
+| **Inventory** | Current inventory items, quantities, and GE prices |
+| **Equipment** | Gear equipped across all slots |
+| **Closest to Level Up** | Skill nearest to leveling with XP remaining and progress bar |
+| **Top 5 Skills to 99** | Highest non-99 skills with progress bars |
+| **XP Summary** | Total XP, total level, and per-skill breakdown |
+
+### Quick Setup
+
+1. Create the **Player Selector** helper (`input_select.osrs_player_selector`) — see [`custom_helpers/installation.md`](custom_helpers/installation.md)
+2. Add the **Template Sensors** from [`custom_helpers/template_sensors.yaml`](custom_helpers/template_sensors.yaml) to your `configuration.yaml`
+3. Restart Home Assistant
+4. Add cards from the [`dashboard/cards/`](dashboard/cards/) folder to your Lovelace dashboard, or use the complete [`dashboard/full_dashboard.yaml`](dashboard/full_dashboard.yaml)
+
+Every card includes a **player selector** dropdown — change the player and all cards update automatically.
+
+See [`dashboard/README.md`](dashboard/README.md) for detailed card documentation, previews, and customization options.
+
+### Automation Blueprints
+
+Pre-built automation blueprints are included in [`custom_helpers/blueprints/`](custom_helpers/blueprints/):
+
+| Blueprint | Description |
+|-----------|-------------|
+| **Level-Up Notification** | Get notified when any skill levels up |
+| **Low HP Alert** | Alert when HP drops below a threshold, optional light flash |
+| **XP Milestone** | Notify when total XP passes a configurable milestone |
+
+Copy the blueprint files to `config/blueprints/automation/osrs_data/` and restart HA. See [`custom_helpers/installation.md`](custom_helpers/installation.md) for details.
+
 ## Privacy & Security
 
 - Pairing codes are one-time-use and expire after 5 minutes.

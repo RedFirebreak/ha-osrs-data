@@ -1,0 +1,92 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Top 5 Skills to 99 Card
+# ──────────────────────────────────────────────────────────────────────
+# Lists the top 5 highest-level skills that are NOT yet 99,
+# with progress bars showing how far each is from 99.
+#
+# Requirements:  None (pure Lovelace markdown).
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "🏆 Select Player"
+
+  # ── Top 5 Skills ───────────────────────────────────────────────────
+  - type: markdown
+    title: "🏆 Top 5 Skills to 99"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #1a2a0a 0%, #2a3a1a 50%, #1a2a0a 100%);
+          border: 2px solid #7cfc00;
+          border-radius: 12px;
+        }
+        h1 { color: #7cfc00; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+
+      {% set xp_for_99 = 13034431 %}
+
+      {% set skill_icons = {
+        'Attack': '⚔️', 'Hitpoints': '❤️', 'Mining': '⛏️',
+        'Strength': '💪', 'Agility': '🏃', 'Smithing': '🔨',
+        'Defence': '🛡️', 'Herblore': '🌿', 'Fishing': '🐟',
+        'Ranged': '🏹', 'Thieving': '🗝️', 'Cooking': '🍳',
+        'Prayer': '✨', 'Crafting': '✂️', 'Firemaking': '🔥',
+        'Magic': '🔮', 'Fletching': '🪶', 'Woodcutting': '🪓',
+        'Runecraft': '🟣', 'Slayer': '💀', 'Farming': '🌱',
+        'Construction': '🏠', 'Hunter': '🦎'
+      } %}
+
+      {% set skills = [
+        'Attack', 'Defence', 'Strength', 'Hitpoints', 'Ranged', 'Prayer',
+        'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
+        'Firemaking', 'Crafting', 'Smithing', 'Mining', 'Herblore',
+        'Agility', 'Thieving', 'Slayer', 'Farming', 'Runecraft',
+        'Hunter', 'Construction'
+      ] %}
+
+      {% set ns = namespace(skill_data=[]) %}
+      {% for skill in skills %}
+        {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill | lower ~ '_level' %}
+        {% set level = states(entity) | int(0) %}
+        {% set xp = state_attr(entity, 'xp') | int(0) %}
+        {% if level > 0 and level < 99 %}
+          {% set pct = ((xp / xp_for_99) * 100) | round(1) %}
+          {% set ns.skill_data = ns.skill_data + [{'name': skill, 'level': level, 'xp': xp, 'pct': pct}] %}
+        {% endif %}
+      {% endfor %}
+
+      {% set sorted_skills = ns.skill_data | sort(attribute='level', reverse=true) %}
+      {% set top5 = sorted_skills[:5] %}
+
+      {% if top5 | length == 0 %}
+
+      🎉 **All skills are 99!** You're maxed!
+
+      {% else %}
+
+      <div style="padding:4px;">
+      {% for s in top5 %}
+        {% set icon = skill_icons.get(s.name, '📊') %}
+        {% set xp_remaining = xp_for_99 - s.xp %}
+        {% set bar_color = '#7cfc00' if s.pct > 75 else '#ffde00' if s.pct > 50 else '#ff8c00' if s.pct > 25 else '#ff4444' %}
+        <div style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span>{{ icon }} <strong style="color:#fff;">{{ s.name }}</strong></span>
+            <span style="color:#aaa;">Lvl <strong style="color:#fff;">{{ s.level }}</strong> · {{ '{:,}'.format(s.xp) }} xp</span>
+          </div>
+          <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:16px; border:1px solid #333; position:relative;">
+            <div style="background:linear-gradient(90deg, {{ bar_color }}88, {{ bar_color }}); height:100%; width:{{ s.pct }}%; transition:width 0.5s; border-radius:8px;"></div>
+            <span style="position:absolute; top:0; right:6px; font-size:0.7em; color:#fff; line-height:16px;">{{ s.pct }}%</span>
+          </div>
+          <div style="text-align:right; color:#888; font-size:0.75em;">{{ '{:,}'.format(xp_remaining) }} XP to 99</div>
+        </div>
+      {% endfor %}
+      </div>
+
+      {% endif %}

@@ -1,0 +1,72 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS XP Summary Card
+# ──────────────────────────────────────────────────────────────────────
+# Shows total XP, total level, and per-skill XP in a compact
+# summary format.  Can be extended with HA utility_meter helpers
+# for daily/weekly XP tracking (see installation.md for details).
+#
+# Requirements:  Template sensors from custom_helpers/template_sensors.yaml
+# ──────────────────────────────────────────────────────────────────────
+
+type: vertical-stack
+cards:
+  # ── Player selector ────────────────────────────────────────────────
+  - type: entities
+    entities:
+      - entity: input_select.osrs_player_selector
+        name: "⭐ Select Player"
+
+  # ── XP Summary ─────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: entity
+        entity: sensor.osrs_total_xp
+        name: "Total XP"
+        icon: mdi:star-circle
+      - type: entity
+        entity: sensor.osrs_total_level
+        name: "Total Level"
+        icon: mdi:sigma
+      - type: entity
+        entity: sensor.osrs_combat_level
+        name: "Combat"
+        icon: mdi:sword-cross
+
+  # ── Per-Skill XP Breakdown ─────────────────────────────────────────
+  - type: markdown
+    title: "⭐ XP Breakdown"
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+          border: 2px solid #ffd700;
+          border-radius: 12px;
+        }
+        h1 { color: #ffd700; text-shadow: 1px 1px 2px #000; }
+    content: >-
+      {% set player = states('input_select.osrs_player_selector') | lower | replace(' ', '_') %}
+
+      {% set skills = [
+        ('Attack', '⚔️'), ('Hitpoints', '❤️'), ('Mining', '⛏️'),
+        ('Strength', '💪'), ('Agility', '🏃'), ('Smithing', '🔨'),
+        ('Defence', '🛡️'), ('Herblore', '🌿'), ('Fishing', '🐟'),
+        ('Ranged', '🏹'), ('Thieving', '🗝️'), ('Cooking', '🍳'),
+        ('Prayer', '✨'), ('Crafting', '✂️'), ('Firemaking', '🔥'),
+        ('Magic', '🔮'), ('Fletching', '🪶'), ('Woodcutting', '🪓'),
+        ('Runecraft', '🟣'), ('Slayer', '💀'), ('Farming', '🌱'),
+        ('Construction', '🏠'), ('Hunter', '🦎')
+      ] %}
+
+      | Skill | Level | XP |
+      |:------|:-----:|---:|
+      {% for skill in skills %}
+        {% set entity = 'sensor.osrs_' ~ player ~ '_' ~ skill[0] | lower ~ '_level' %}
+        {% set level = states(entity) | int(0) %}
+        {% set xp = state_attr(entity, 'xp') | int(0) %}
+      | {{ skill[1] }} {{ skill[0] }} | {{ level }} | {{ '{:,}'.format(xp) }} |
+      {% endfor %}
+
+      ---
+
+      > 💡 **Tip:** Add `utility_meter` helpers to track daily/weekly XP gains
+      > per skill. See `custom_helpers/installation.md` for setup instructions.

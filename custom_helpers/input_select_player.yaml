@@ -1,0 +1,18 @@
+# ──────────────────────────────────────────────────────────────────────
+# OSRS Player Selector — input_select helper
+# ──────────────────────────────────────────────────────────────────────
+# This input_select lets each dashboard card target a specific player.
+# Add your RuneScape player names to the options list below.
+#
+# Paste into your configuration.yaml (or include via !include).
+# ──────────────────────────────────────────────────────────────────────
+
+input_select:
+  osrs_player_selector:
+    name: "OSRS Player Selector"
+    icon: mdi:account-search
+    options:
+      # ── Replace these with your actual player names ──
+      - "PlayerOne"
+      - "PlayerTwo"
+    initial: "PlayerOne"
