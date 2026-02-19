@@ -2,7 +2,7 @@
 
 Provides:
   POST /api/osrs-data/pair         — consume a pairing code and receive a device token
-  POST /api/osrs-data/events       — submit event data (authenticated via X-Osrs-Token)
+  POST /api/osrs-data/events       — submit player data (authenticated via X-Osrs-Token)
   GET  /api/osrs-data/devices      — list paired devices
   DELETE /api/osrs-data/devices/{device_id} — revoke a paired device
 """
@@ -31,7 +31,7 @@ from .const import (
     PAIRING_CODE_TTL,
     SIGNAL_ACCOUNT_UPDATED,
 )
-from .parser.dispatcher import dispatch as dispatch_parser
+from .parser.base import parse as parse_player_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,55 +56,14 @@ def _build_save_payload(entry_data: dict[str, Any]) -> dict[str, Any]:
     return save_data
 
 
-def _build_normalized_event(
-    payload: dict[str, Any],
-    image_meta: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Build a normalized event dict from a Dink payload."""
-    event: dict[str, Any] = {
-        "event_type": payload.get("type", "UNKNOWN"),
-        "account": {
-            "playerName": payload.get("playerName"),
-            "accountType": payload.get("accountType"),
-            "dinkAccountHash": payload.get("dinkAccountHash"),
-            "seasonalWorld": payload.get("seasonalWorld"),
-        },
-        "received_at": datetime.now(timezone.utc).isoformat(),
-        "data": payload.get("extra", {}),
-        "raw_meta": {},
-    }
-
-    if "world" in payload:
-        event["raw_meta"]["world"] = payload["world"]
-    if "regionId" in payload:
-        event["raw_meta"]["regionId"] = payload["regionId"]
-
-    if image_meta:
-        event["image"] = image_meta
-
-    return event
-
-
-def _get_file_size(file_obj: Any) -> int:
-    """Get file size by seeking (blocking I/O, run in executor)."""
-    file_obj.seek(0, 2)
-    size = file_obj.tell()
-    file_obj.seek(0)
-    return size
-
-
-def _extract_image_metadata(file_field: Any) -> dict[str, Any] | None:
-    """Extract basic metadata from an uploaded file field (no bytes persisted).
-
-    Note: call _get_file_size via hass.async_add_executor_job for the size.
-    """
-    if file_field is None:
-        return None
-
+def _build_normalized_event(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Build a normalized event dict for the Home Assistant event bus."""
     return {
-        "filename": getattr(file_field, "filename", None),
-        "content_type": getattr(file_field, "content_type", None),
-        "size": None,
+        "player_name": parsed.get("name"),
+        "account_type": parsed.get("accountType"),
+        "world": parsed.get("world"),
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "events": parsed.get("events", []),
     }
 
 
@@ -233,14 +192,14 @@ class OsrsPairView(HomeAssistantView):
 
 
 class OsrsEventsView(HomeAssistantView):
-    """Handle event submissions from paired RuneLite clients."""
+    """Handle player data submissions from paired RuneLite clients."""
 
     url = "/api/osrs-data/events"
     name = "api:osrs-data:events"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
-        """Process an event submission."""
+        """Process a player data submission."""
         hass: HomeAssistant = request.app["hass"]
         entry_data = _get_entry_data(hass)
         if entry_data is None:
@@ -260,73 +219,43 @@ class OsrsEventsView(HomeAssistantView):
             return self.json({"ok": False, "error": "Invalid or revoked token"}, status_code=403)
 
         try:
-            content_type = request.headers.get("Content-Type", "")
-            payload: dict[str, Any] = {}
-            image_meta: dict[str, Any] | None = None
+            payload = await request.json()
 
-            if "multipart/form-data" in content_type:
-                form = await request.post()
-                raw = form.get("payload_json")
-                if raw:
-                    payload = json.loads(raw)
-                file_field = form.get("file")
-                image_meta = _extract_image_metadata(file_field)
-                if (
-                    image_meta is not None
-                    and hasattr(file_field, "file")
-                    and file_field.file
-                ):
-                    image_meta["size"] = await hass.async_add_executor_job(
-                        _get_file_size, file_field.file
-                    )
-            else:
-                payload = await request.json()
+            parsed = parse_player_data(payload)
+            if parsed is None:
+                return self.json({"ok": False, "error": "Invalid payload: missing player data"}, status_code=400)
 
-            event_data = _build_normalized_event(payload, image_meta)
+            player_name = parsed["name"]
+            account_id = player_name
 
-            event_type = payload.get("type", "UNKNOWN")
-            extra = payload.get("extra", {})
-            player_name = payload.get("playerName", "Unknown")
-            account_hash = payload.get("dinkAccountHash")
-            account_id = account_hash or player_name
-            if not account_hash:
-                _LOGGER.debug("No dinkAccountHash; using playerName as account key")
+            # Dedupe check
+            dedupe = entry_data.get(DATA_DEDUPE_CACHE)
+            if dedupe is not None and dedupe.is_duplicate(account_id, payload):
+                _LOGGER.debug("Dropping duplicate data for %s", account_id)
+                return self.json({"ok": True, "duplicate": True})
 
-            parsed = dispatch_parser(event_type, extra, player_name)
+            store = entry_data.get(DATA_ACCOUNT_STORE)
+            if store is not None:
+                acct = store.get_or_create(None, player_name)
+                acct.update_player_data(parsed, player_name=player_name)
 
-            if parsed is not None:
-                # Dedupe check
-                dedupe = entry_data.get(DATA_DEDUPE_CACHE)
-                if dedupe is not None and dedupe.is_duplicate(
-                    account_id, event_type, extra
-                ):
-                    _LOGGER.debug(
-                        "Dropping duplicate event %s for %s", event_type, account_id
-                    )
-                    return self.json({"ok": True, "duplicate": True})
-
-                store = entry_data.get(DATA_ACCOUNT_STORE)
-                if store is not None:
-                    acct = store.get_or_create(account_hash, player_name)
-                    acct.record_event(
-                        event_type,
-                        parsed["summary"],
-                        parsed["data"],
-                        player_name=player_name,
+                # Record to history buffer
+                history_store = entry_data.get(DATA_HISTORY_STORE)
+                if history_store is not None:
+                    hist = history_store.get_or_create(account_id)
+                    hist.record(
+                        "DATA_UPDATE",
+                        f"Player data updated for {player_name}",
+                        parsed,
                     )
 
-                    # Record to history buffer
-                    history_store = entry_data.get(DATA_HISTORY_STORE)
-                    if history_store is not None:
-                        hist = history_store.get_or_create(account_id)
-                        hist.record(event_type, parsed["summary"], parsed["data"])
+                async_dispatcher_send(
+                    hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
+                )
 
-                    async_dispatcher_send(
-                        hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
-                    )
+                _schedule_save(entry_data)
 
-                    _schedule_save(entry_data)
-
+            event_data = _build_normalized_event(parsed)
             hass.bus.async_fire(EVENT_TYPE, event_data)
 
             return self.json({"ok": True})

@@ -1,1 +1,1 @@
-"""Parser subsystem for OSRS Data Dink payloads."""
+"""Parser subsystem for OSRS Data Runelite plugin payloads."""
