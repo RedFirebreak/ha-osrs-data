@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "OSRS Data",
-        "description": "Set up the OSRS Data integration to receive RuneLite/Dink notifications.",
+        "description": "Set up the OSRS Data integration to receive RuneLite notifications.",
         "data": {
           "title": "Name"
         }

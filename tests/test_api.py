@@ -70,15 +70,28 @@ from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
 
 # ── Sample payloads ──────────────────────────────────────────────────
 
-LEVEL_PAYLOAD: dict[str, Any] = {
-    "type": "LEVEL",
-    "playerName": "PlayerOne",
-    "accountType": "NORMAL",
-    "dinkAccountHash": "hashAAA",
-    "extra": {
-        "levelledSkills": {"Attack": 70},
-        "combatLevel": {"value": 85, "increased": True},
-    },
+BASE_PAYLOAD: dict[str, Any] = {
+    "player": {
+        "name": "PlayerOne",
+        "accountType": "normal",
+        "world": "302",
+        "stats": {
+            "skills": {
+                "Attack": {"xp": 737627, "level": 60},
+            }
+        },
+        "inventory": {
+            "items": [
+                {"name": "Shark", "gePrice": 800, "haPrice": 600, "quantity": 10},
+            ]
+        },
+        "equipment": {
+            "items": [
+                {"name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE"},
+            ]
+        },
+        "events": [],
+    }
 }
 
 
@@ -192,7 +205,7 @@ class TestOsrsEventsView:
 
         view = OsrsEventsView()
         request = _make_json_request(
-            hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": token}
+            hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token}
         )
         result = await view.post(request)
 
@@ -202,8 +215,8 @@ class TestOsrsEventsView:
         hass.bus.async_fire.assert_called_once()
 
         # Account should be updated
-        acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.last_event_type == "LEVEL"
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.account_type == "normal"
 
     @pytest.mark.asyncio
     async def test_events_missing_token(self):
@@ -211,7 +224,7 @@ class TestOsrsEventsView:
         hass, _, _, _ = _make_hass_with_pairing()
 
         view = OsrsEventsView()
-        request = _make_json_request(hass, LEVEL_PAYLOAD)
+        request = _make_json_request(hass, BASE_PAYLOAD)
         result = await view.post(request)
 
         assert result.status == 401
@@ -225,7 +238,7 @@ class TestOsrsEventsView:
 
         view = OsrsEventsView()
         request = _make_json_request(
-            hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": "bad_token"}
+            hass, BASE_PAYLOAD, headers={"X-Osrs-Token": "bad_token"}
         )
         result = await view.post(request)
 
@@ -244,7 +257,7 @@ class TestOsrsEventsView:
 
         view = OsrsEventsView()
         request = _make_json_request(
-            hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": token}
+            hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token}
         )
         result = await view.post(request)
 
@@ -260,14 +273,14 @@ class TestOsrsEventsView:
 
         view = OsrsEventsView()
         request = _make_json_request(
-            hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": token}
+            hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token}
         )
         await view.post(request)
 
         hass.bus.async_fire.assert_called_once()
         event_name, event_data = hass.bus.async_fire.call_args[0]
         assert event_name == "osrs_data_event"
-        assert event_data["event_type"] == "LEVEL"
+        assert event_data["player_name"] == "PlayerOne"
 
     @pytest.mark.asyncio
     async def test_events_schedules_save(self):
@@ -279,7 +292,7 @@ class TestOsrsEventsView:
 
         view = OsrsEventsView()
         request = _make_json_request(
-            hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": token}
+            hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token}
         )
         await view.post(request)
 
@@ -295,10 +308,10 @@ class TestOsrsEventsView:
 
         view = OsrsEventsView()
         r1 = await view.post(
-            _make_json_request(hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": token})
+            _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token})
         )
         r2 = await view.post(
-            _make_json_request(hass, LEVEL_PAYLOAD, headers={"X-Osrs-Token": token})
+            _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token})
         )
 
         body1 = json.loads(r1.body)
@@ -511,10 +524,15 @@ class TestOsrsPairViewConfigFlowPending:
         event_request = _make_json_request(
             hass,
             {
-                "type": "LOOT",
-                "playerName": "TestPlayer",
-                "dinkAccountHash": "test_hash",
-                "extra": {"items": [], "source": "Test", "category": "EVENT"},
+                "player": {
+                    "name": "TestPlayer",
+                    "accountType": "normal",
+                    "world": "302",
+                    "stats": {"skills": {}},
+                    "inventory": {"items": []},
+                    "equipment": {"items": []},
+                    "events": [],
+                }
             },
             headers={"X-Osrs-Token": token},
         )

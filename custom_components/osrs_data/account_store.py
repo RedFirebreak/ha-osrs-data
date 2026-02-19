@@ -13,131 +13,122 @@ def _normalize_player_name(name: str) -> str:
 
 
 class AccountState:
-    """Per-account event details and detail sensors."""
-
-    # Event types that get their own "Last <Type>" sensor
-    TYPED_EVENT_TYPES: tuple[str, ...] = (
-        "LOOT",
-        "DEATH",
-        "PET",
-        "QUEST",
-        "COMBAT_ACHIEVEMENT",
-        "ACHIEVEMENT_DIARY",
-        "COLLECTION",
-    )
+    """Per-account player state and detail sensors."""
 
     def __init__(self, account_hash: str, player_name: str) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
+        self.account_type: str | None = None
+        self.world: str | None = None
 
-        # Last event (any type)
-        self.last_event_type: str | None = None
-        self.last_event_summary: str | None = None
-        self.last_event_data: dict[str, Any] = {}
-        self.last_update: str | None = None
+        # Skills: {skill_name: {"xp": ..., "level": ...}}
+        self.skills: dict[str, dict[str, Any]] = {}
 
-        # Per-type last event: type → {summary, data, last_update}
-        self.last_typed_events: dict[str, dict[str, Any]] = {}
+        # Inventory: list of item dicts (max 28 slots)
+        self.inventory: list[dict[str, Any]] = []
+
+        # Equipment: {slot: item_dict or {}}
+        self.equipment: dict[str, dict[str, Any]] = {}
+
+        # Health: {current: int, max: int}
+        self.health: dict[str, int] = {"current": 0, "max": 0}
+
+        # Prayer: {current: int, max: int}
+        self.prayer: dict[str, int] = {"current": 0, "max": 0}
+
+        # Location: {x: int, y: int, plane: int}
+        self.location: dict[str, int] = {"x": 0, "y": 0, "plane": 0}
+
+        # Events: list (future use, initially empty)
+        self.events: list[Any] = []
 
         # Detail sensors: key → {value, attributes, last_update}
-        # Only LEVEL events produce detail sensors (per-skill + combat level)
         self.detail_sensors: dict[str, dict[str, Any]] = {}
 
-    def _update_detail_sensors(
-        self, event_type: str, data: dict[str, Any]
-    ) -> None:
-        """Extract detail sensor entries from parsed event data.
+        self.last_update: str | None = None
 
-        Only LEVEL events produce detail sensors (individual skills and
-        combat level).  All other event types use per-type last-event
-        sensors instead.
-        """
-        if event_type != "LEVEL":
-            return
-
-        now = datetime.now(timezone.utc).isoformat()
-
-        # Update all skills from the allSkills snapshot (full refresh)
-        for skill, level in data.get("allSkills", {}).items():
-            self.detail_sensors[skill] = {
-                "value": level,
-                "attributes": {"skill": skill},
-                "last_update": now,
-            }
-
-        # Overlay levelled skills (may have the same values, but ensures
-        # freshly-levelled skills are always present even without allSkills)
-        for skill, level in data.get("levelledSkills", {}).items():
-            self.detail_sensors[skill] = {
-                "value": level,
-                "attributes": {"skill": skill},
-                "last_update": now,
-            }
-
-        # Store combat level
-        if "combatLevel" in data:
-            self.detail_sensors["Combat Level"] = {
-                "value": data["combatLevel"],
-                "attributes": {
-                    "increased": data.get("combatLevelIncreased", False),
-                },
-                "last_update": now,
-            }
-
-    def record_event(
+    def update_player_data(
         self,
-        event_type: str,
-        summary: str,
-        data: dict[str, Any],
+        parsed: dict[str, Any],
         player_name: str | None = None,
     ) -> None:
-        """Record a parsed event and update detail sensors."""
+        """Update from parsed base JSON player data."""
         if player_name:
             self.player_name = player_name
 
         now = datetime.now(timezone.utc).isoformat()
-
-        self.last_event_type = event_type
-        self.last_event_summary = summary
-        self.last_event_data = data
         self.last_update = now
 
-        # Update per-type last event
-        if event_type in self.TYPED_EVENT_TYPES:
-            self.last_typed_events[event_type] = {
-                "summary": summary,
-                "data": data,
-                "last_update": now,
-            }
+        self.account_type = parsed.get("accountType", self.account_type)
+        self.world = parsed.get("world", self.world)
+        self.events = parsed.get("events", [])
+        self.inventory = parsed.get("inventory", [])
+        self.equipment = parsed.get("equipment", {})
+        self.health = parsed.get("health", {"current": 0, "max": 0})
+        self.prayer = parsed.get("prayer", {"current": 0, "max": 0})
+        self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
 
-        self._update_detail_sensors(event_type, data)
+        # Update skills and detail sensors
+        new_skills = parsed.get("skills", {})
+        for skill_name, skill_data in new_skills.items():
+            new_xp = skill_data.get("xp", 0)
+            new_level = skill_data.get("level", 1)
+            old = self.skills.get(skill_name, {})
+
+            if (
+                old.get("xp") != new_xp
+                or old.get("level") != new_level
+                or skill_name not in self.skills
+            ):
+                self.detail_sensors[f"{skill_name} XP"] = {
+                    "value": new_xp,
+                    "attributes": {"skill": skill_name},
+                    "last_update": now,
+                }
+                self.detail_sensors[f"{skill_name} Level"] = {
+                    "value": new_level,
+                    "attributes": {"skill": skill_name},
+                    "last_update": now,
+                }
+
+            self.skills[skill_name] = {"xp": new_xp, "level": new_level}
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
         return {
             "account_hash": self.account_hash,
             "player_name": self.player_name,
-            "last_event_type": self.last_event_type,
-            "last_event_summary": self.last_event_summary,
-            "last_event_data": self.last_event_data,
-            "last_update": self.last_update,
-            "last_typed_events": self.last_typed_events,
+            "account_type": self.account_type,
+            "world": self.world,
+            "skills": self.skills,
+            "inventory": self.inventory,
+            "equipment": self.equipment,
+            "health": self.health,
+            "prayer": self.prayer,
+            "location": self.location,
+            "events": self.events,
             "detail_sensors": self.detail_sensors,
+            "last_update": self.last_update,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
         """Restore the account state from a persisted dict."""
         self.player_name = data.get("player_name", self.player_name)
-        self.last_event_type = data.get("last_event_type")
-        self.last_event_summary = data.get("last_event_summary")
-        self.last_event_data = data.get("last_event_data", {})
-        self.last_update = data.get("last_update")
-        self.last_typed_events = data.get("last_typed_events", {})
+        self.account_type = data.get("account_type")
+        self.world = data.get("world")
+        self.skills = data.get("skills", {})
+        self.inventory = data.get("inventory", [])
+        self.equipment = data.get("equipment", {})
+        self.health = data.get("health", {"current": 0, "max": 0})
+        self.prayer = data.get("prayer", {"current": 0, "max": 0})
+        self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
+        self.events = data.get("events", [])
         self.detail_sensors = data.get("detail_sensors", {})
+        self.last_update = data.get("last_update")
 
 
 class AccountStore:
-    """In-memory store keyed by dinkAccountHash (fallback: playerName)."""
+    """In-memory store keyed by account identifier (fallback: playerName)."""
 
     def __init__(self) -> None:
         self._by_hash: dict[str, AccountState] = {}

@@ -4,7 +4,7 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RedFirebreak&category=Integration&repository=ha-osrs-data)
 
-A Home Assistant custom integration that receives RuneLite (Dink) notifications and turns them into:
+A Home Assistant custom integration that receives RuneLite plugin data and turns them into:
 - Home Assistant events (for automations)
 - Sensors/entities (for dashboards and history)
 - Persistent history (last X events per account/type survive restarts)
@@ -110,7 +110,7 @@ History survives Home Assistant restarts.
 
 ### Event deduplication
 
-If Dink retries an event (e.g., due to network issues), the integration ignores exact duplicate events within a 30-second window. Distinct events (different loot drops, different skills, etc.) always pass through.
+If the RuneLite plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a 30-second window. Distinct data updates always pass through.
 
 ## Automations
 
@@ -183,28 +183,15 @@ Every `osrs_data_event` contains:
 
 ```json
 {
-  "event_type": "LOOT",
-  "account": {
-    "playerName": "YourRSN",
-    "accountType": "NORMAL",
-    "dinkAccountHash": "abc123...",
-    "seasonalWorld": false
-  },
+  "player_name": "YourRSN",
+  "account_type": "normal",
+  "world": "302",
   "received_at": "2025-01-15T12:34:56+00:00",
-  "data": { },
-  "raw_meta": {
-    "world": 518,
-    "regionId": 12850
-  },
-  "image": {
-    "filename": "screenshot.png",
-    "content_type": "image/png",
-    "size": 102400
-  }
+  "events": []
 }
 ```
 
-The `data` field contains event-type-specific parsed data (see `samples/` for full examples).
+See `samples/runelite-post-request.md` for a full example of the payload sent by the RuneLite plugin.
 
 ## Privacy & Security
 
