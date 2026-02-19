@@ -96,6 +96,16 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             "max": prayer_data.get("max", 0),
         }
 
+    # ── Location ─────────────────────────────────────────────────────
+    location: dict[str, int] = {"x": 0, "y": 0, "plane": 0}
+    location_data = player.get("location")
+    if isinstance(location_data, dict):
+        location = {
+            "x": location_data.get("x", 0),
+            "y": location_data.get("y", 0),
+            "plane": location_data.get("plane", 0),
+        }
+
     # ── Events (future use, initially empty) ─────────────────────────
     events = player.get("events", [])
     if not isinstance(events, list):
@@ -110,5 +120,6 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "equipment": equipment,
         "health": health,
         "prayer": prayer,
+        "location": location,
         "events": events,
     }

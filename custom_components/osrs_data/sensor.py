@@ -58,6 +58,7 @@ async def async_setup_entry(
             new_entities.append(OsrsEquipmentSensor(entry, state, slug))
             new_entities.append(OsrsHealthSensor(entry, state, slug))
             new_entities.append(OsrsPrayerSensor(entry, state, slug))
+            new_entities.append(OsrsLocationSensor(entry, state, slug))
 
         # Create detail sensors for any new keys (skill xp & level)
         for key in state.detail_sensors:
@@ -204,6 +205,60 @@ class OsrsInventorySensor(SensorEntity):
             "items": self._state.inventory,
             "slots_used": len(self._state.inventory),
             "slots_total": 28,
+        }
+        if self._state.last_update:
+            attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Location sensor ──────────────────────────────────────────────────
+
+
+class OsrsLocationSensor(SensorEntity):
+    """Sensor whose state is the tile coordinates, attributes hold x/y/plane."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Location"
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_location"
+
+    @property
+    def native_value(self) -> str:
+        """Tile coordinates as 'x, y'."""
+        loc = self._state.location
+        return f"{loc.get('x', 0)}, {loc.get('y', 0)}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        loc = self._state.location
+        attrs: dict[str, Any] = {
+            "x": loc.get("x", 0),
+            "y": loc.get("y", 0),
+            "plane": loc.get("plane", 0),
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update

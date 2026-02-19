@@ -23,6 +23,11 @@
       "current": 43,
       "max": 43
     },
+    "location": {
+      "x": 1416,
+      "y": 3350,
+      "plane": 0
+    },
     "equipment": {
       "items": [
         { "name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE" },

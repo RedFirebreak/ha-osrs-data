@@ -36,6 +36,9 @@ class AccountState:
         # Prayer: {current: int, max: int}
         self.prayer: dict[str, int] = {"current": 0, "max": 0}
 
+        # Location: {x: int, y: int, plane: int}
+        self.location: dict[str, int] = {"x": 0, "y": 0, "plane": 0}
+
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
 
@@ -63,6 +66,7 @@ class AccountState:
         self.equipment = parsed.get("equipment", {})
         self.health = parsed.get("health", {"current": 0, "max": 0})
         self.prayer = parsed.get("prayer", {"current": 0, "max": 0})
+        self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
 
         # Update skills and detail sensors
         new_skills = parsed.get("skills", {})
@@ -101,6 +105,7 @@ class AccountState:
             "equipment": self.equipment,
             "health": self.health,
             "prayer": self.prayer,
+            "location": self.location,
             "events": self.events,
             "detail_sensors": self.detail_sensors,
             "last_update": self.last_update,
@@ -116,6 +121,7 @@ class AccountState:
         self.equipment = data.get("equipment", {})
         self.health = data.get("health", {"current": 0, "max": 0})
         self.prayer = data.get("prayer", {"current": 0, "max": 0})
+        self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
         self.events = data.get("events", [])
         self.detail_sensors = data.get("detail_sensors", {})
         self.last_update = data.get("last_update")
