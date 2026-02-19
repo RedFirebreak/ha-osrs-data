@@ -4,11 +4,11 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RedFirebreak&category=Integration&repository=ha-osrs-data)
 
-A Home Assistant custom integration that receives RuneLite plugin data and turns them into:
+A Home Assistant custom integration that receives real-time player data from a RuneLite plugin and turns it into:
+- Rich sensors/entities per account (stats, inventory, equipment, health, prayer, location, spellbook)
 - Home Assistant events (for automations)
-- Sensors/entities (for dashboards and history)
-- Persistent history (last X events per account/type survive restarts)
-- Automatic deduplication of event retries
+- Persistent state (account data survives restarts)
+- Automatic deduplication of retried submissions
 
 ## Installation
 
@@ -71,42 +71,33 @@ DELETE /api/osrs-data/devices/{device_id}
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
 | `POST /api/osrs-data/pair` | None (code-gated) | Consume a pairing code, receive device token |
-| `POST /api/osrs-data/events` | `X-Osrs-Token` header | Submit event data |
+| `POST /api/osrs-data/events` | `X-Osrs-Token` header | Submit player data |
 | `POST /api/osrs-data/pair/code` | HA auth | Generate a new pairing code |
 | `GET /api/osrs-data/devices` | HA auth | List paired devices |
 | `DELETE /api/osrs-data/devices/{id}` | HA auth | Revoke a device |
 
 ## Features
 
-### Event types
-
-| Type | What it tracks |
-|------|----------------|
-| `LEVEL` | Skill level-ups and combat level changes |
-| `LOOT` | Item drops with source, value, rarity |
-| `DEATH` | Deaths with items lost/kept, PvP/NPC info |
-| `PET` | Pet drops and duplicates |
-| `QUEST` | Quest completions and progress |
-| `COMBAT_ACHIEVEMENT` | Combat task completions and tier progress |
-| `ACHIEVEMENT_DIARY` | Diary completions by area and difficulty |
-| `COLLECTION` | Collection log entries |
-
 ### Sensors
 
-For each RuneScape account, the integration creates:
-- **Counter sensors** — cumulative totals for each event type (levels, loot events, deaths, pets, quests, combat tasks, diaries)
-- **Last Event sensor** — the most recent event type, summary, and parsed data as attributes
-- **Per-type last event sensors** — last loot, last death, last pet, etc.
-- **Skill level sensors** — individual skill levels (created on first level event)
+The integration automatically creates a **Status** sensor (shows `ready` with the endpoint URLs as attributes) and, for each RuneScape account that sends data, a full set of per-account sensors grouped under an HA device named **OSRS \<PlayerName\>**:
 
-### Persistent history
+| Sensor | State | Key Attributes |
+|--------|-------|----------------|
+| **Player Info** | Player name | `account_type`, `world`, `last_update`, `events` |
+| **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28) |
+| **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
+| **Health** | Current HP | `current`, `max`, `last_update` |
+| **Prayer Points** | Current prayer points | `current`, `max`, `last_update` |
+| **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update` |
+| **Spellbook** | Active spellbook name | `id`, `last_update` |
+| **\<Skill\> Level** *(per skill)* | Skill level | `xp`, `last_update` |
 
-Event history is stored per account and per event type using ring buffers:
-- **Loot**: last 100 entries
-- **Deaths**: last 50 entries
-- **All other types**: last 50 entries
+Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account.
 
-History survives Home Assistant restarts.
+### Persistence
+
+Account state, paired devices, and history are persisted to disk via Home Assistant's built-in store. All data survives HA restarts. A deferred save (5 s) batches rapid updates.
 
 ### Event deduplication
 
@@ -114,72 +105,9 @@ If the RuneLite plugin retries a submission (e.g., due to network issues), the i
 
 ## Automations
 
-The integration fires `osrs_data_event` on the Home Assistant event bus. Use an **Event trigger** to build automations.
+The integration fires an `osrs_data_event` on the Home Assistant event bus each time data is received. Use an **Event trigger** to build automations.
 
-### Example: notify on rare loot
-
-```yaml
-automation:
-  - alias: "OSRS rare loot alert"
-    trigger:
-      - platform: event
-        event_type: osrs_data_event
-        event_data:
-          event_type: LOOT
-    condition:
-      - condition: template
-        value_template: "{{ trigger.event.data.data.totalValue | int > 100000 }}"
-    action:
-      - service: notify.mobile_app_my_phone
-        data:
-          title: "💰 Rare drop!"
-          message: >
-            {{ trigger.event.data.account.playerName }} looted
-            {{ trigger.event.data.data.items | map(attribute='name') | join(', ') }}
-            worth {{ trigger.event.data.data.totalValue | int }} gp
-```
-
-### Example: flash lights on death
-
-```yaml
-automation:
-  - alias: "OSRS death flash"
-    trigger:
-      - platform: event
-        event_type: osrs_data_event
-        event_data:
-          event_type: DEATH
-    action:
-      - service: light.turn_on
-        target:
-          entity_id: light.desk_lamp
-        data:
-          color_name: red
-          flash: short
-```
-
-### Example: TTS on pet drop
-
-```yaml
-automation:
-  - alias: "OSRS pet announcement"
-    trigger:
-      - platform: event
-        event_type: osrs_data_event
-        event_data:
-          event_type: PET
-    action:
-      - service: tts.google_translate_say
-        data:
-          entity_id: media_player.living_room
-          message: >
-            {{ trigger.event.data.account.playerName }} just got a pet!
-            {{ trigger.event.data.data.petName }}
-```
-
-## Event data structure
-
-Every `osrs_data_event` contains:
+The event payload looks like:
 
 ```json
 {
@@ -189,6 +117,59 @@ Every `osrs_data_event` contains:
   "received_at": "2025-01-15T12:34:56+00:00",
   "events": []
 }
+```
+
+### Example: announce world change
+
+```yaml
+automation:
+  - alias: "OSRS world change"
+    trigger:
+      - platform: state
+        entity_id: sensor.osrs_playerone_player_info
+        attribute: world
+    action:
+      - service: notify.mobile_app_my_phone
+        data:
+          title: "World hop"
+          message: >
+            {{ state_attr('sensor.osrs_playerone_player_info', 'player_name') }}
+            moved to world {{ state_attr('sensor.osrs_playerone_player_info', 'world') }}
+```
+
+### Example: low HP alert
+
+```yaml
+automation:
+  - alias: "OSRS low HP alert"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.osrs_playerone_health
+        below: 20
+    action:
+      - service: notify.mobile_app_my_phone
+        data:
+          title: "⚠️ Low HP!"
+          message: >
+            {{ state_attr('sensor.osrs_playerone_health', 'current') }} /
+            {{ state_attr('sensor.osrs_playerone_health', 'max') }} HP
+```
+
+### Example: flash lights on event
+
+```yaml
+automation:
+  - alias: "OSRS data received"
+    trigger:
+      - platform: event
+        event_type: osrs_data_event
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.desk_lamp
+        data:
+          color_name: green
+          flash: short
 ```
 
 See `samples/runelite-post-request.md` for a full example of the payload sent by the RuneLite plugin.
