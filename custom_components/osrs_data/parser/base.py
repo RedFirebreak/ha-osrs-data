@@ -55,6 +55,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     for item in inv_items[:28]:
         if isinstance(item, dict):
             inventory.append({
+                "id": item.get("id"),
                 "name": item.get("name", ""),
                 "gePrice": item.get("gePrice", 0),
                 "haPrice": item.get("haPrice", 0),
@@ -76,6 +77,24 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
                     "quantity": item.get("quantity", 0),
                 }
 
+    # ── Health ────────────────────────────────────────────────────────
+    health: dict[str, int] = {"current": 0, "max": 0}
+    health_data = player.get("health")
+    if isinstance(health_data, dict):
+        health = {
+            "current": health_data.get("current", 0),
+            "max": health_data.get("max", 0),
+        }
+
+    # ── Prayer ────────────────────────────────────────────────────────
+    prayer: dict[str, int] = {"current": 0, "max": 0}
+    prayer_data = player.get("prayer")
+    if isinstance(prayer_data, dict):
+        prayer = {
+            "current": prayer_data.get("current", 0),
+            "max": prayer_data.get("max", 0),
+        }
+
     # ── Events (future use, initially empty) ─────────────────────────
     events = player.get("events", [])
     if not isinstance(events, list):
@@ -88,5 +107,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "skills": skills,
         "inventory": inventory,
         "equipment": equipment,
+        "health": health,
+        "prayer": prayer,
         "events": events,
     }

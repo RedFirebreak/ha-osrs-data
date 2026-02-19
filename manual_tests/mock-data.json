@@ -15,6 +15,14 @@
         { "name": "Shark", "gePrice": 800, "haPrice": 600, "quantity": 10 }
       ]
     },
+    "health": {
+      "current": 75,
+      "max": 99
+    },
+    "prayer": {
+      "current": 43,
+      "max": 43
+    },
     "equipment": {
       "items": [
         { "name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE" },

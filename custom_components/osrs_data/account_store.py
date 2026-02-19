@@ -30,6 +30,12 @@ class AccountState:
         # Equipment: {slot: item_dict or {}}
         self.equipment: dict[str, dict[str, Any]] = {}
 
+        # Health: {current: int, max: int}
+        self.health: dict[str, int] = {"current": 0, "max": 0}
+
+        # Prayer: {current: int, max: int}
+        self.prayer: dict[str, int] = {"current": 0, "max": 0}
+
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
 
@@ -55,6 +61,8 @@ class AccountState:
         self.events = parsed.get("events", [])
         self.inventory = parsed.get("inventory", [])
         self.equipment = parsed.get("equipment", {})
+        self.health = parsed.get("health", {"current": 0, "max": 0})
+        self.prayer = parsed.get("prayer", {"current": 0, "max": 0})
 
         # Update skills and detail sensors
         new_skills = parsed.get("skills", {})
@@ -91,6 +99,8 @@ class AccountState:
             "skills": self.skills,
             "inventory": self.inventory,
             "equipment": self.equipment,
+            "health": self.health,
+            "prayer": self.prayer,
             "events": self.events,
             "detail_sensors": self.detail_sensors,
             "last_update": self.last_update,
@@ -104,6 +114,8 @@ class AccountState:
         self.skills = data.get("skills", {})
         self.inventory = data.get("inventory", [])
         self.equipment = data.get("equipment", {})
+        self.health = data.get("health", {"current": 0, "max": 0})
+        self.prayer = data.get("prayer", {"current": 0, "max": 0})
         self.events = data.get("events", [])
         self.detail_sensors = data.get("detail_sensors", {})
         self.last_update = data.get("last_update")
