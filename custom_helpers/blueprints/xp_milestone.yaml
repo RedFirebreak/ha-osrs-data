@@ -44,5 +44,5 @@ action:
     data:
       title: "🏆 OSRS XP Milestone!"
       message: >-
-        Total XP has reached {{ states(trigger.entity_id) | int | filesizeformat }}!
+        Total XP has reached {{ '{:,}'.format(states(trigger.entity_id) | int) }}!
         Congratulations!

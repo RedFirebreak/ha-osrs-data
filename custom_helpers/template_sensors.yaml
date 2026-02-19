@@ -232,7 +232,7 @@ template:
           {% set pray = states('sensor.osrs_' ~ player ~ '_prayer_level') | int(1) %}
           {% set rng = states('sensor.osrs_' ~ player ~ '_ranged_level') | int(1) %}
           {% set mag = states('sensor.osrs_' ~ player ~ '_magic_level') | int(1) %}
-          {% set base = ((def + hp + (pray / 2) | int) / 4) | round(2) %}
+          {% set base = ((def + hp + (pray // 2)) / 4) | round(2) %}
           {% set melee = (att + str) * 0.325 %}
           {% set range = rng * 1.5 * 0.325 %}
           {% set mage = mag * 1.5 * 0.325 %}
