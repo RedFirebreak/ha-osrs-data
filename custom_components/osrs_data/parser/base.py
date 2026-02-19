@@ -71,6 +71,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             slot = item.get("equipmentSlot", "").upper()
             if slot in equipment:
                 equipment[slot] = {
+                    "id": item.get("id"),
                     "name": item.get("name", ""),
                     "gePrice": item.get("gePrice", 0),
                     "haPrice": item.get("haPrice", 0),
