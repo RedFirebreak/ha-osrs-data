@@ -57,8 +57,9 @@ async def async_setup_entry(
             new_entities.append(OsrsInventorySensor(entry, state, slug))
             new_entities.append(OsrsEquipmentSensor(entry, state, slug))
             new_entities.append(OsrsHealthSensor(entry, state, slug))
-            new_entities.append(OsrsPrayerSensor(entry, state, slug))
+            new_entities.append(OsrsPrayerPointsSensor(entry, state, slug))
             new_entities.append(OsrsLocationSensor(entry, state, slug))
+            new_entities.append(OsrsSpellbookSensor(entry, state, slug))
 
         # Create detail sensors for any new keys (skill xp & level)
         for key in state.detail_sensors:
@@ -227,6 +228,56 @@ class OsrsInventorySensor(SensorEntity):
         )
 
 
+# ── Spellbook sensor ─────────────────────────────────────────────────
+
+
+class OsrsSpellbookSensor(SensorEntity):
+    """Sensor whose state is the spellbook name, attribute holds the id."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Spellbook"
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_spellbook"
+
+    @property
+    def native_value(self) -> str:
+        """Active spellbook name."""
+        return self._state.spellbook.get("name", "")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {
+            "id": self._state.spellbook.get("id", 0),
+        }
+        if self._state.last_update:
+            attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
 # ── Location sensor ──────────────────────────────────────────────────
 
 
@@ -281,14 +332,14 @@ class OsrsLocationSensor(SensorEntity):
         )
 
 
-# ── Prayer sensor ────────────────────────────────────────────────────
+# ── Prayer Points sensor ─────────────────────────────────────────────
 
 
-class OsrsPrayerSensor(SensorEntity):
+class OsrsPrayerPointsSensor(SensorEntity):
     """Sensor whose state is current prayer points, attributes hold current/max."""
 
     _attr_has_entity_name = True
-    _attr_name = "Prayer"
+    _attr_name = "Prayer Points"
 
     def __init__(
         self,
@@ -298,18 +349,18 @@ class OsrsPrayerSensor(SensorEntity):
     ) -> None:
         self._entry = entry
         self._state = state
-        self._attr_unique_id = f"{state.account_hash}_prayer"
+        self._attr_unique_id = f"{state.account_hash}_prayer_points"
 
     @property
     def native_value(self) -> int:
         """Current prayer points."""
-        return self._state.prayer.get("current", 0)
+        return self._state.prayer_points.get("current", 0)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs: dict[str, Any] = {
-            "current": self._state.prayer.get("current", 0),
-            "max": self._state.prayer.get("max", 0),
+            "current": self._state.prayer_points.get("current", 0),
+            "max": self._state.prayer_points.get("max", 0),
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update

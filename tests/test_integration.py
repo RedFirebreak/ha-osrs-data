@@ -174,7 +174,7 @@ class TestEventsIntegration:
         acct = store.get_or_create(None, "PlayerOne")
         assert acct.account_type == "normal"
         assert acct.world == "302"
-        assert "Attack XP" in acct.detail_sensors
+        assert "Attack" in acct.detail_sensors
 
     @pytest.mark.asyncio
     async def test_multi_account_separate_state(self):
@@ -190,8 +190,8 @@ class TestEventsIntegration:
 
         assert acct_a.account_type == "normal"
         assert acct_b.account_type == "iron"
-        assert "Attack XP" in acct_a.detail_sensors
-        assert "Defence XP" in acct_b.detail_sensors
+        assert "Attack" in acct_a.detail_sensors
+        assert "Defence" in acct_b.detail_sensors
 
     @pytest.mark.asyncio
     async def test_same_account_multiple_updates(self):
@@ -203,8 +203,8 @@ class TestEventsIntegration:
         await view.post(_make_json_request(hass, PLAYER_ONE_UPDATED_PAYLOAD, token))
 
         acct = store.get_or_create(None, "PlayerOne")
-        assert acct.detail_sensors["Attack XP"]["value"] == 900000
-        assert acct.detail_sensors["Attack Level"]["value"] == 70
+        assert acct.detail_sensors["Attack"]["value"] == 70
+        assert acct.detail_sensors["Attack"]["attributes"]["xp"] == 900000
 
     @pytest.mark.asyncio
     async def test_dispatcher_signal_fired(self):

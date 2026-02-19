@@ -56,7 +56,7 @@ X-Osrs-Token: <device-token>
             "current": 75,
             "max": 99
         },
-        "prayer": {
+        "prayerPoints": {
             "current": 43,
             "max": 43
         },
@@ -64,6 +64,10 @@ X-Osrs-Token: <device-token>
             "x": 1416,
             "y": 3350,
             "plane": 0
+        },
+        "spellbook": {
+            "id": 3,
+            "name": "arceuus"
         },
         "equipment": {
             "items": [
@@ -91,8 +95,9 @@ X-Osrs-Token: <device-token>
 | Player Info | Player name | `account_type`, `world`, `last_update`, `events` |
 | Inventory | Number of items | `items` (list), `slots_used`, `slots_total` (28) |
 | Health | Current hitpoints | `current`, `max`, `last_update` |
-| Prayer | Current prayer points | `current`, `max`, `last_update` |
+| Prayer Points | Current prayer points | `current`, `max`, `last_update` |
 | Location | Tile coordinates (x, y) | `x`, `y`, `plane`, `last_update` |
+| Spellbook | Active spellbook name | `id`, `last_update` |
 | Equipment | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
 | `<Skill> XP` | XP value | `skill` |
 | `<Skill> Level` | Level value | `skill` |

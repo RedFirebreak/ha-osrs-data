@@ -19,7 +19,7 @@
       "current": 75,
       "max": 99
     },
-    "prayer": {
+    "prayerPoints": {
       "current": 43,
       "max": 43
     },
@@ -27,6 +27,10 @@
       "x": 1416,
       "y": 3350,
       "plane": 0
+    },
+    "spellbook": {
+      "id": 3,
+      "name": "arceuus"
     },
     "equipment": {
       "items": [

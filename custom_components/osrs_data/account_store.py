@@ -33,11 +33,14 @@ class AccountState:
         # Health: {current: int, max: int}
         self.health: dict[str, int] = {"current": 0, "max": 0}
 
-        # Prayer: {current: int, max: int}
-        self.prayer: dict[str, int] = {"current": 0, "max": 0}
+        # Prayer Points: {current: int, max: int}
+        self.prayer_points: dict[str, int] = {"current": 0, "max": 0}
 
         # Location: {x: int, y: int, plane: int}
         self.location: dict[str, int] = {"x": 0, "y": 0, "plane": 0}
+
+        # Spellbook: {id: int, name: str}
+        self.spellbook: dict[str, Any] = {"id": 0, "name": ""}
 
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
@@ -65,8 +68,9 @@ class AccountState:
         self.inventory = parsed.get("inventory", [])
         self.equipment = parsed.get("equipment", {})
         self.health = parsed.get("health", {"current": 0, "max": 0})
-        self.prayer = parsed.get("prayer", {"current": 0, "max": 0})
+        self.prayer_points = parsed.get("prayerPoints", {"current": 0, "max": 0})
         self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
+        self.spellbook = parsed.get("spellbook", {"id": 0, "name": ""})
 
         # Update skills and detail sensors
         new_skills = parsed.get("skills", {})
@@ -80,14 +84,9 @@ class AccountState:
                 or old.get("level") != new_level
                 or skill_name not in self.skills
             ):
-                self.detail_sensors[f"{skill_name} XP"] = {
-                    "value": new_xp,
-                    "attributes": {"skill": skill_name},
-                    "last_update": now,
-                }
-                self.detail_sensors[f"{skill_name} Level"] = {
+                self.detail_sensors[skill_name] = {
                     "value": new_level,
-                    "attributes": {"skill": skill_name},
+                    "attributes": {"xp": new_xp},
                     "last_update": now,
                 }
 
@@ -104,8 +103,9 @@ class AccountState:
             "inventory": self.inventory,
             "equipment": self.equipment,
             "health": self.health,
-            "prayer": self.prayer,
+            "prayerPoints": self.prayer_points,
             "location": self.location,
+            "spellbook": self.spellbook,
             "events": self.events,
             "detail_sensors": self.detail_sensors,
             "last_update": self.last_update,
@@ -120,8 +120,9 @@ class AccountState:
         self.inventory = data.get("inventory", [])
         self.equipment = data.get("equipment", {})
         self.health = data.get("health", {"current": 0, "max": 0})
-        self.prayer = data.get("prayer", {"current": 0, "max": 0})
+        self.prayer_points = data.get("prayerPoints", {"current": 0, "max": 0})
         self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
+        self.spellbook = data.get("spellbook", {"id": 0, "name": ""})
         self.events = data.get("events", [])
         self.detail_sensors = data.get("detail_sensors", {})
         self.last_update = data.get("last_update")

@@ -41,11 +41,9 @@ class TestDetailSensorsSkills:
         state.update_player_data({
             "skills": {"Attack": {"xp": 737627, "level": 60}},
         })
-        assert "Attack XP" in state.detail_sensors
-        assert "Attack Level" in state.detail_sensors
-        assert state.detail_sensors["Attack XP"]["value"] == 737627
-        assert state.detail_sensors["Attack Level"]["value"] == 60
-        assert state.detail_sensors["Attack XP"]["attributes"]["skill"] == "Attack"
+        assert "Attack" in state.detail_sensors
+        assert state.detail_sensors["Attack"]["value"] == 60
+        assert state.detail_sensors["Attack"]["attributes"]["xp"] == 737627
 
     def test_creates_sensors_for_multiple_skills(self):
         state = AccountState("hash1", "Player")
@@ -55,12 +53,12 @@ class TestDetailSensorsSkills:
                 "Defence": {"xp": 2000, "level": 20},
             },
         })
-        assert "Attack XP" in state.detail_sensors
-        assert "Attack Level" in state.detail_sensors
-        assert "Defence XP" in state.detail_sensors
-        assert "Defence Level" in state.detail_sensors
-        assert state.detail_sensors["Attack XP"]["value"] == 1000
-        assert state.detail_sensors["Defence Level"]["value"] == 20
+        assert "Attack" in state.detail_sensors
+        assert "Defence" in state.detail_sensors
+        assert state.detail_sensors["Attack"]["value"] == 10
+        assert state.detail_sensors["Attack"]["attributes"]["xp"] == 1000
+        assert state.detail_sensors["Defence"]["value"] == 20
+        assert state.detail_sensors["Defence"]["attributes"]["xp"] == 2000
 
     def test_updates_existing_skill_sensor(self):
         state = AccountState("hash1", "Player")
@@ -70,8 +68,8 @@ class TestDetailSensorsSkills:
         state.update_player_data({
             "skills": {"Attack": {"xp": 2000, "level": 11}},
         })
-        assert state.detail_sensors["Attack XP"]["value"] == 2000
-        assert state.detail_sensors["Attack Level"]["value"] == 11
+        assert state.detail_sensors["Attack"]["value"] == 11
+        assert state.detail_sensors["Attack"]["attributes"]["xp"] == 2000
 
     def test_no_skills_no_detail_sensors(self):
         state = AccountState("hash1", "Player")
@@ -94,10 +92,10 @@ class TestDetailSensorsSkills:
                 "Magic": {"xp": 400, "level": 40},
             },
         })
-        # 4 skills × 2 sensors each = 8 detail sensors
-        assert len(state.detail_sensors) == 8
-        assert state.detail_sensors["Magic XP"]["value"] == 400
-        assert state.detail_sensors["Magic Level"]["value"] == 40
+        # 4 skills × 1 sensor each = 4 detail sensors
+        assert len(state.detail_sensors) == 4
+        assert state.detail_sensors["Magic"]["value"] == 40
+        assert state.detail_sensors["Magic"]["attributes"]["xp"] == 400
 
     def test_unchanged_skill_not_refreshed(self):
         """If XP and level are the same, the sensor should not be refreshed."""
@@ -105,29 +103,29 @@ class TestDetailSensorsSkills:
         state.update_player_data({
             "skills": {"Attack": {"xp": 1000, "level": 10}},
         })
-        first_ts = state.detail_sensors["Attack XP"]["last_update"]
+        first_ts = state.detail_sensors["Attack"]["last_update"]
 
         import time
         time.sleep(0.01)
         state.update_player_data({
             "skills": {"Attack": {"xp": 1000, "level": 10}},
         })
-        assert state.detail_sensors["Attack XP"]["last_update"] == first_ts
+        assert state.detail_sensors["Attack"]["last_update"] == first_ts
 
     def test_xp_change_triggers_refresh(self):
         state = AccountState("hash1", "Player")
         state.update_player_data({
             "skills": {"Attack": {"xp": 1000, "level": 10}},
         })
-        first_ts = state.detail_sensors["Attack XP"]["last_update"]
+        first_ts = state.detail_sensors["Attack"]["last_update"]
 
         import time
         time.sleep(0.01)
         state.update_player_data({
             "skills": {"Attack": {"xp": 1500, "level": 10}},
         })
-        assert state.detail_sensors["Attack XP"]["value"] == 1500
-        assert state.detail_sensors["Attack XP"]["last_update"] != first_ts
+        assert state.detail_sensors["Attack"]["attributes"]["xp"] == 1500
+        assert state.detail_sensors["Attack"]["last_update"] != first_ts
 
 
 class TestInventoryAndEquipment:

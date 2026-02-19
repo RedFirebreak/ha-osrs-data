@@ -87,11 +87,11 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             "max": health_data.get("max", 0),
         }
 
-    # ── Prayer ────────────────────────────────────────────────────────
-    prayer: dict[str, int] = {"current": 0, "max": 0}
-    prayer_data = player.get("prayer")
+    # ── Prayer Points ─────────────────────────────────────────────────
+    prayer_points: dict[str, int] = {"current": 0, "max": 0}
+    prayer_data = player.get("prayerPoints")
     if isinstance(prayer_data, dict):
-        prayer = {
+        prayer_points = {
             "current": prayer_data.get("current", 0),
             "max": prayer_data.get("max", 0),
         }
@@ -104,6 +104,15 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             "x": location_data.get("x", 0),
             "y": location_data.get("y", 0),
             "plane": location_data.get("plane", 0),
+        }
+
+    # ── Spellbook ────────────────────────────────────────────────────
+    spellbook: dict[str, Any] = {"id": 0, "name": ""}
+    spellbook_data = player.get("spellbook")
+    if isinstance(spellbook_data, dict):
+        spellbook = {
+            "id": spellbook_data.get("id", 0),
+            "name": spellbook_data.get("name", ""),
         }
 
     # ── Events (future use, initially empty) ─────────────────────────
@@ -119,7 +128,8 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "inventory": inventory,
         "equipment": equipment,
         "health": health,
-        "prayer": prayer,
+        "prayerPoints": prayer_points,
         "location": location,
+        "spellbook": spellbook,
         "events": events,
     }
