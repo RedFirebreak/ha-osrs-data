@@ -28,6 +28,10 @@
       "y": 3350,
       "plane": 0
     },
+    "spellbook": {
+      "id": 3,
+      "name": "arceuus"
+    },
     "equipment": {
       "items": [
         { "name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE" },

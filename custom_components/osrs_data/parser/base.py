@@ -106,6 +106,15 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             "plane": location_data.get("plane", 0),
         }
 
+    # ── Spellbook ────────────────────────────────────────────────────
+    spellbook: dict[str, Any] = {"id": 0, "name": ""}
+    spellbook_data = player.get("spellbook")
+    if isinstance(spellbook_data, dict):
+        spellbook = {
+            "id": spellbook_data.get("id", 0),
+            "name": spellbook_data.get("name", ""),
+        }
+
     # ── Events (future use, initially empty) ─────────────────────────
     events = player.get("events", [])
     if not isinstance(events, list):
@@ -121,5 +130,6 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "health": health,
         "prayer": prayer,
         "location": location,
+        "spellbook": spellbook,
         "events": events,
     }

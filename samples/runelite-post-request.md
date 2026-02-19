@@ -65,6 +65,10 @@ X-Osrs-Token: <device-token>
             "y": 3350,
             "plane": 0
         },
+        "spellbook": {
+            "id": 3,
+            "name": "arceuus"
+        },
         "equipment": {
             "items": [
                 { "name": "Neitiznot faceguard", "gePrice": 3500000, "haPrice": 60000, "quantity": 1, "equipmentSlot": "HEAD" },
@@ -93,6 +97,7 @@ X-Osrs-Token: <device-token>
 | Health | Current hitpoints | `current`, `max`, `last_update` |
 | Prayer | Current prayer points | `current`, `max`, `last_update` |
 | Location | Tile coordinates (x, y) | `x`, `y`, `plane`, `last_update` |
+| Spellbook | Active spellbook name | `id`, `last_update` |
 | Equipment | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
 | `<Skill> XP` | XP value | `skill` |
 | `<Skill> Level` | Level value | `skill` |
