@@ -65,42 +65,52 @@ from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
 
 # ── Sample payloads ──────────────────────────────────────────────────
 
-LEVEL_PAYLOAD: dict[str, Any] = {
-    "type": "LEVEL",
-    "playerName": "PlayerOne",
-    "accountType": "NORMAL",
-    "dinkAccountHash": "hashAAA",
-    "extra": {
-        "levelledSkills": {"Attack": 70},
-        "combatLevel": {"value": 85, "increased": True},
-    },
+PLAYER_ONE_PAYLOAD: dict[str, Any] = {
+    "player": {
+        "name": "PlayerOne",
+        "accountType": "normal",
+        "world": "302",
+        "stats": {
+            "skills": {
+                "Attack": {"xp": 737627, "level": 60},
+            }
+        },
+        "inventory": {"items": []},
+        "equipment": {"items": []},
+        "events": [],
+    }
 }
 
-DEATH_PAYLOAD: dict[str, Any] = {
-    "type": "DEATH",
-    "playerName": "PlayerTwo",
-    "accountType": "IRONMAN",
-    "dinkAccountHash": "hashBBB",
-    "extra": {
-        "valueLost": 5000,
-        "isPvp": False,
-        "keptItems": [],
-        "lostItems": [],
-    },
+PLAYER_TWO_PAYLOAD: dict[str, Any] = {
+    "player": {
+        "name": "PlayerTwo",
+        "accountType": "iron",
+        "world": "303",
+        "stats": {
+            "skills": {
+                "Defence": {"xp": 123456, "level": 50},
+            }
+        },
+        "inventory": {"items": []},
+        "equipment": {"items": []},
+        "events": [],
+    }
 }
 
-QUEST_PAYLOAD: dict[str, Any] = {
-    "type": "QUEST",
-    "playerName": "PlayerOne",
-    "accountType": "NORMAL",
-    "dinkAccountHash": "hashAAA",
-    "extra": {
-        "questName": "Dragon Slayer I",
-        "completedQuests": 22,
-        "totalQuests": 156,
-        "questPoints": 44,
-        "totalQuestPoints": 293,
-    },
+PLAYER_ONE_UPDATED_PAYLOAD: dict[str, Any] = {
+    "player": {
+        "name": "PlayerOne",
+        "accountType": "normal",
+        "world": "302",
+        "stats": {
+            "skills": {
+                "Attack": {"xp": 900000, "level": 70},
+            }
+        },
+        "inventory": {"items": []},
+        "equipment": {"items": []},
+        "events": [],
+    }
 }
 
 
@@ -151,19 +161,20 @@ class TestEventsIntegration:
     """End-to-end tests: events API handler updates account store."""
 
     @pytest.mark.asyncio
-    async def test_level_updates_account_store(self):
-        """LEVEL event updates account state for correct account."""
+    async def test_player_data_updates_account_store(self):
+        """Player data payload updates account state correctly."""
         hass, store, token, _ = _setup_hass_and_token()
         view = OsrsEventsView()
-        request = _make_json_request(hass, LEVEL_PAYLOAD, token)
+        request = _make_json_request(hass, PLAYER_ONE_PAYLOAD, token)
         result = await view.post(request)
 
         assert result.status == 200
         body = json.loads(result.body)
         assert body == {"ok": True}
-        acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.last_event_type == "LEVEL"
-        assert "Attack" in acct.last_event_summary
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.account_type == "normal"
+        assert acct.world == "302"
+        assert "Attack XP" in acct.detail_sensors
 
     @pytest.mark.asyncio
     async def test_multi_account_separate_state(self):
@@ -171,83 +182,67 @@ class TestEventsIntegration:
         hass, store, token, _ = _setup_hass_and_token()
         view = OsrsEventsView()
 
-        await view.post(_make_json_request(hass, LEVEL_PAYLOAD, token))
-        await view.post(_make_json_request(hass, DEATH_PAYLOAD, token))
+        await view.post(_make_json_request(hass, PLAYER_ONE_PAYLOAD, token))
+        await view.post(_make_json_request(hass, PLAYER_TWO_PAYLOAD, token))
 
-        acct_a = store.get_or_create("hashAAA", "PlayerOne")
-        acct_b = store.get_or_create("hashBBB", "PlayerTwo")
+        acct_a = store.get_or_create(None, "PlayerOne")
+        acct_b = store.get_or_create(None, "PlayerTwo")
 
-        assert acct_a.last_event_type == "LEVEL"
-        assert acct_b.last_event_type == "DEATH"
+        assert acct_a.account_type == "normal"
+        assert acct_b.account_type == "iron"
+        assert "Attack XP" in acct_a.detail_sensors
+        assert "Defence XP" in acct_b.detail_sensors
 
     @pytest.mark.asyncio
-    async def test_same_account_multiple_events(self):
-        """Same account receives multiple events, last event updates."""
+    async def test_same_account_multiple_updates(self):
+        """Same account receives multiple updates, skills change."""
         hass, store, token, _ = _setup_hass_and_token()
         view = OsrsEventsView()
 
-        await view.post(_make_json_request(hass, LEVEL_PAYLOAD, token))
-        await view.post(_make_json_request(hass, QUEST_PAYLOAD, token))
+        await view.post(_make_json_request(hass, PLAYER_ONE_PAYLOAD, token))
+        await view.post(_make_json_request(hass, PLAYER_ONE_UPDATED_PAYLOAD, token))
 
-        acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.last_event_type == "QUEST"
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.detail_sensors["Attack XP"]["value"] == 900000
+        assert acct.detail_sensors["Attack Level"]["value"] == 70
 
     @pytest.mark.asyncio
     async def test_dispatcher_signal_fired(self):
         """Verify dispatcher signal is sent for account updates."""
         hass, store, token, _ = _setup_hass_and_token()
         view = OsrsEventsView()
-        request = _make_json_request(hass, LEVEL_PAYLOAD, token)
+        request = _make_json_request(hass, PLAYER_ONE_PAYLOAD, token)
 
         # Patch dispatcher
         with patch(
             "custom_components.osrs_data.api.async_dispatcher_send"
         ) as mock_signal:
             await view.post(request)
-            mock_signal.assert_called_once_with(
-                hass, SIGNAL_ACCOUNT_UPDATED, "hashAAA"
-            )
+            mock_signal.assert_called_once()
+            call_args = mock_signal.call_args[0]
+            assert call_args[0] is hass
+            assert call_args[1] == SIGNAL_ACCOUNT_UPDATED
 
     @pytest.mark.asyncio
-    async def test_unsupported_type_no_store_update(self):
-        """Unsupported event types don't update the store."""
+    async def test_invalid_payload_returns_400(self):
+        """Payload without player data returns 400."""
         hass, store, token, _ = _setup_hass_and_token()
-        payload = {
-            "type": "LOGIN",
-            "playerName": "Player",
-            "dinkAccountHash": "hashXYZ",
-            "extra": {},
-        }
+        payload = {"not_player": "data"}
         view = OsrsEventsView()
         request = _make_json_request(hass, payload, token)
         result = await view.post(request)
 
-        assert result.status == 200
+        assert result.status == 400
         body = json.loads(result.body)
-        assert body == {"ok": True}
-        # The account should NOT be created since LOGIN is not a parsed type
+        assert body["ok"] is False
         assert len(store.accounts) == 0
-
-    @pytest.mark.asyncio
-    async def test_no_embeds_dependency(self):
-        """Parsing does not depend on embeds being present."""
-        hass, store, token, _ = _setup_hass_and_token()
-        payload = dict(LEVEL_PAYLOAD)
-        payload.pop("embeds", None)
-        view = OsrsEventsView()
-        request = _make_json_request(hass, payload, token)
-
-        result = await view.post(request)
-        assert result.status == 200
-        acct = store.get_or_create("hashAAA", "PlayerOne")
-        assert acct.last_event_type == "LEVEL"
 
     @pytest.mark.asyncio
     async def test_events_schedules_save(self):
         """Events handler schedules a deferred save to persist state."""
         hass, store, token, mock_storage = _setup_hass_and_token()
         view = OsrsEventsView()
-        request = _make_json_request(hass, LEVEL_PAYLOAD, token)
+        request = _make_json_request(hass, PLAYER_ONE_PAYLOAD, token)
         await view.post(request)
 
         mock_storage.async_delay_save.assert_called_once()

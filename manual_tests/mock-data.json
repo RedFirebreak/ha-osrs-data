@@ -1,24 +1,26 @@
 {
-  "type": "LOOT",
-  "playerName": "TestPlayer",
-  "accountType": "NORMAL",
-  "dinkAccountHash": "manual_test_hash_abc123",
-  "seasonalWorld": false,
-  "world": 420,
-  "regionId": 14642,
-  "extra": {
-    "items": [
-      {
-        "id": 11286,
-        "quantity": 1,
-        "priceEach": 42069,
-        "name": "Dragon scimitar",
-        "rarity": 0.01,
-        "criteria": ["VALUE"]
+  "player": {
+    "name": "TestPlayer",
+    "accountType": "normal",
+    "world": "420",
+    "stats": {
+      "skills": {
+        "Attack": { "xp": 737627, "level": 60 },
+        "Defence": { "xp": 123456, "level": 50 }
       }
-    ],
-    "source": "Manual Test Boss",
-    "category": "EVENT",
-    "killCount": 1
+    },
+    "inventory": {
+      "items": [
+        { "name": "Dragon scimitar", "gePrice": 42069, "haPrice": 12000, "quantity": 1 },
+        { "name": "Shark", "gePrice": 800, "haPrice": 600, "quantity": 10 }
+      ]
+    },
+    "equipment": {
+      "items": [
+        { "name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE" },
+        { "name": "Abyssal whip", "gePrice": 1500000, "haPrice": 72000, "quantity": 1, "equipmentSlot": "WEAPON" }
+      ]
+    },
+    "events": []
   }
 }

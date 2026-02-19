@@ -1,4 +1,4 @@
-"""Tests for the parser subsystem – dispatcher + individual parsers."""
+"""Tests for the parser subsystem – base JSON parser."""
 
 from __future__ import annotations
 
@@ -26,362 +26,243 @@ _root = os.path.join(os.path.dirname(__file__), "..")
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from custom_components.osrs_data.parser.dispatcher import (  # noqa: E402
-    dispatch,
-    SUPPORTED_TYPES,
+from custom_components.osrs_data.parser.base import (  # noqa: E402
+    parse,
+    EQUIPMENT_SLOTS,
 )
 
 
-# ── Dispatcher ───────────────────────────────────────────────────────
+# ── Valid payloads ──────────────────────────────────────────────────
 
 
-class TestDispatcher:
-    def test_supported_types(self):
-        expected = {
-            "LEVEL", "LOOT", "DEATH", "PET",
-            "QUEST", "COMBAT_ACHIEVEMENT", "ACHIEVEMENT_DIARY",
-            "COLLECTION",
+class TestBaseParser:
+    def test_valid_full_payload(self):
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "PlayerOne",
+                "accountType": "normal",
+                "world": "302",
+                "stats": {
+                    "skills": {
+                        "Attack": {"xp": 737627, "level": 60},
+                        "Defence": {"xp": 123456, "level": 50},
+                    }
+                },
+                "inventory": {
+                    "items": [
+                        {"name": "Shark", "gePrice": 800, "haPrice": 600, "quantity": 10},
+                    ]
+                },
+                "equipment": {
+                    "items": [
+                        {"name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE"},
+                    ]
+                },
+                "events": [],
+            }
         }
-        assert SUPPORTED_TYPES == expected
-
-    def test_unsupported_type_returns_none(self):
-        assert dispatch("LOGIN", {}, "Player") is None
-
-    def test_case_insensitive(self):
-        result = dispatch("level", {"levelledSkills": {"Attack": 50}}, "P")
+        result = parse(payload)
         assert result is not None
+        assert result["name"] == "PlayerOne"
+        assert result["accountType"] == "normal"
+        assert result["world"] == "302"
+        assert "Attack" in result["skills"]
+        assert result["skills"]["Attack"]["xp"] == 737627
+        assert result["skills"]["Attack"]["level"] == 60
+        assert len(result["inventory"]) == 1
+        assert result["inventory"][0]["name"] == "Shark"
+        assert result["equipment"]["CAPE"]["name"] == "Fire cape"
+        assert result["events"] == []
 
+    def test_missing_player_returns_none(self):
+        assert parse({}) is None
+        assert parse({"something": "else"}) is None
 
-# ── LEVEL parser ─────────────────────────────────────────────────────
+    def test_player_not_dict_returns_none(self):
+        assert parse({"player": "invalid"}) is None
+        assert parse({"player": None}) is None
 
-
-class TestLevelParser:
-    def test_basic_level(self):
-        extra: dict[str, Any] = {
-            "levelledSkills": {"Attack": 70},
-            "allSkills": {"Attack": 70, "Strength": 60},
-            "combatLevel": {"value": 85, "increased": True},
-        }
-        result = dispatch("LEVEL", extra, "PlayerOne")
+    def test_minimal_player(self):
+        result = parse({"player": {"name": "Test"}})
         assert result is not None
-        assert "Attack" in result["summary"]
-        assert result["data"]["levelledSkills"] == {"Attack": 70}
-        assert result["data"]["combatLevel"] == 85
-        assert result["data"]["combatLevelIncreased"] is True
+        assert result["name"] == "Test"
+        assert result["accountType"] == "normal"
+        assert result["world"] is None
+        assert result["skills"] == {}
+        assert result["inventory"] == []
+        assert result["events"] == []
 
+
+# ── Skills parsing ──────────────────────────────────────────────────
+
+
+class TestSkillsParsing:
     def test_multiple_skills(self):
-        extra: dict[str, Any] = {
-            "levelledSkills": {"Attack": 70, "Defence": 65},
-            "combatLevel": {"value": 85, "increased": False},
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "P",
+                "stats": {
+                    "skills": {
+                        "Attack": {"xp": 100, "level": 10},
+                        "Strength": {"xp": 200, "level": 20},
+                        "Magic": {"xp": 300, "level": 30},
+                    }
+                },
+            }
         }
-        result = dispatch("LEVEL", extra, "Player")
+        result = parse(payload)
         assert result is not None
-        assert "Attack" in result["summary"]
-        assert "Defence" in result["summary"]
+        assert len(result["skills"]) == 3
+        assert result["skills"]["Magic"]["xp"] == 300
+        assert result["skills"]["Magic"]["level"] == 30
 
-    def test_no_combat_level(self):
-        extra: dict[str, Any] = {
-            "levelledSkills": {"Fishing": 50},
+    def test_empty_skills(self):
+        result = parse({"player": {"name": "P", "stats": {"skills": {}}}})
+        assert result is not None
+        assert result["skills"] == {}
+
+    def test_no_stats_section(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["skills"] == {}
+
+    def test_skill_defaults(self):
+        result = parse({"player": {"name": "P", "stats": {"skills": {"Attack": {}}}}})
+        assert result is not None
+        assert result["skills"]["Attack"]["xp"] == 0
+        assert result["skills"]["Attack"]["level"] == 1
+
+    def test_invalid_skill_data_skipped(self):
+        result = parse({"player": {"name": "P", "stats": {"skills": {"Attack": "invalid"}}}})
+        assert result is not None
+        assert "Attack" not in result["skills"]
+
+
+# ── Inventory parsing ───────────────────────────────────────────────
+
+
+class TestInventoryParsing:
+    def test_inventory_items(self):
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "P",
+                "inventory": {
+                    "items": [
+                        {"name": "Shark", "gePrice": 800, "haPrice": 600, "quantity": 10},
+                        {"name": "Lobster", "gePrice": 200, "haPrice": 150, "quantity": 5},
+                    ]
+                },
+            }
         }
-        result = dispatch("LEVEL", extra, "Player")
+        result = parse(payload)
         assert result is not None
-        assert "combatLevel" not in result["data"]
+        assert len(result["inventory"]) == 2
+        assert result["inventory"][0]["name"] == "Shark"
+        assert result["inventory"][1]["gePrice"] == 200
 
-    def test_empty_extra(self):
-        result = dispatch("LEVEL", {}, "Player")
+    def test_max_28_items(self):
+        items = [{"name": f"Item{i}", "quantity": 1} for i in range(35)]
+        result = parse({"player": {"name": "P", "inventory": {"items": items}}})
         assert result is not None
-        assert result["data"]["levelledSkills"] == {}
+        assert len(result["inventory"]) == 28
+
+    def test_empty_inventory(self):
+        result = parse({"player": {"name": "P", "inventory": {"items": []}}})
+        assert result is not None
+        assert result["inventory"] == []
+
+    def test_no_inventory_section(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["inventory"] == []
+
+    def test_item_defaults(self):
+        result = parse({"player": {"name": "P", "inventory": {"items": [{}]}}})
+        assert result is not None
+        assert result["inventory"][0]["name"] == ""
+        assert result["inventory"][0]["gePrice"] == 0
+        assert result["inventory"][0]["haPrice"] == 0
+        assert result["inventory"][0]["quantity"] == 0
 
 
-# ── LOOT parser ──────────────────────────────────────────────────────
+# ── Equipment parsing ───────────────────────────────────────────────
 
 
-class TestLootParser:
-    def test_basic_loot(self):
-        extra: dict[str, Any] = {
-            "items": [
-                {"id": 1234, "quantity": 1, "priceEach": 42069, "name": "Dragon scimitar", "rarity": 0.01, "criteria": ["VALUE"]},
-            ],
-            "source": "Chambers of Xeric",
-            "category": "EVENT",
-            "killCount": 60,
+class TestEquipmentParsing:
+    def test_equipment_slots(self):
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "P",
+                "equipment": {
+                    "items": [
+                        {"name": "Fire cape", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "CAPE"},
+                        {"name": "Dragon boots", "gePrice": 200000, "haPrice": 30000, "quantity": 1, "equipmentSlot": "BOOTS"},
+                    ]
+                },
+            }
         }
-        result = dispatch("LOOT", extra, "Player")
+        result = parse(payload)
         assert result is not None
-        assert "Dragon scimitar" in result["summary"]
-        assert "Chambers of Xeric" in result["summary"]
-        assert result["data"]["source"] == "Chambers of Xeric"
-        assert result["data"]["totalValue"] == 42069
-        assert result["data"]["category"] == "EVENT"
-        assert result["data"]["killCount"] == 60
-        assert result["data"]["items"][0]["rarity"] == 0.01
-        assert result["data"]["items"][0]["criteria"] == ["VALUE"]
+        assert result["equipment"]["CAPE"]["name"] == "Fire cape"
+        assert result["equipment"]["BOOTS"]["name"] == "Dragon boots"
 
-    def test_multiple_items(self):
-        extra: dict[str, Any] = {
-            "items": [
-                {"id": 1, "quantity": 10, "priceEach": 100, "name": "Item A"},
-                {"id": 2, "quantity": 5, "priceEach": 200, "name": "Item B"},
-            ],
-            "source": "Boss",
+    def test_missing_slots_are_empty(self):
+        result = parse({"player": {"name": "P", "equipment": {"items": []}}})
+        assert result is not None
+        for slot in EQUIPMENT_SLOTS:
+            assert result["equipment"][slot] == {}
+
+    def test_all_known_slots(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert set(result["equipment"].keys()) == set(EQUIPMENT_SLOTS)
+
+    def test_unknown_slot_ignored(self):
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "P",
+                "equipment": {
+                    "items": [
+                        {"name": "Weird item", "equipmentSlot": "UNKNOWN_SLOT"},
+                    ]
+                },
+            }
         }
-        result = dispatch("LOOT", extra, "Player")
+        result = parse(payload)
         assert result is not None
-        assert result["data"]["totalValue"] == 10 * 100 + 5 * 200
+        assert "UNKNOWN_SLOT" not in result["equipment"]
 
-    def test_no_items(self):
-        result = dispatch("LOOT", {"source": "Empty"}, "Player")
-        assert result is not None
-        assert result["data"]["items"] == []
-        assert result["data"]["totalValue"] == 0
-        assert "received loot" in result["summary"]
-
-    def test_no_kill_count(self):
-        result = dispatch("LOOT", {"items": [], "source": "Test"}, "Player")
-        assert result is not None
-        assert "killCount" not in result["data"]
-
-
-# ── DEATH parser ─────────────────────────────────────────────────────
-
-
-class TestDeathParser:
-    def test_basic_death(self):
-        extra: dict[str, Any] = {
-            "valueLost": 300,
-            "isPvp": False,
-            "keptItems": [],
-            "lostItems": [{"id": 314, "quantity": 100, "priceEach": 3, "name": "Feather"}],
-            "location": {"regionId": 10546, "plane": 0, "instanced": False},
+    def test_case_insensitive_slot(self):
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "P",
+                "equipment": {
+                    "items": [
+                        {"name": "Cape", "equipmentSlot": "cape"},
+                    ]
+                },
+            }
         }
-        result = dispatch("DEATH", extra, "Player")
+        result = parse(payload)
         assert result is not None
-        assert "300" in result["summary"]
-        assert result["data"]["valueLost"] == 300
-        assert result["data"]["isPvp"] is False
-        assert len(result["data"]["lostItems"]) == 1
-        assert result["data"]["location"]["regionId"] == 10546
+        assert result["equipment"]["CAPE"]["name"] == "Cape"
 
-    def test_pvp_death(self):
-        extra: dict[str, Any] = {
-            "valueLost": 5000,
-            "isPvp": True,
-            "killerName": "PKer123",
-            "keptItems": [],
-            "lostItems": [],
-        }
-        result = dispatch("DEATH", extra, "Victim")
+
+# ── Events parsing ──────────────────────────────────────────────────
+
+
+class TestEventsParsing:
+    def test_empty_events(self):
+        result = parse({"player": {"name": "P", "events": []}})
         assert result is not None
-        assert "PKer123" in result["summary"]
-        assert "PvP" in result["summary"]
-        assert result["data"]["killerName"] == "PKer123"
+        assert result["events"] == []
 
-    def test_npc_death(self):
-        extra: dict[str, Any] = {
-            "valueLost": 1000,
-            "isPvp": False,
-            "killerName": "Vorkath",
-            "killerNpcId": 8061,
-            "keptItems": [],
-            "lostItems": [],
-        }
-        result = dispatch("DEATH", extra, "Player")
+    def test_no_events_key(self):
+        result = parse({"player": {"name": "P"}})
         assert result is not None
-        assert "Vorkath" in result["summary"]
-        assert result["data"]["killerNpcId"] == 8061
+        assert result["events"] == []
 
-    def test_minimal_death(self):
-        result = dispatch("DEATH", {"valueLost": 0, "isPvp": False}, "Player")
+    def test_invalid_events_becomes_empty(self):
+        result = parse({"player": {"name": "P", "events": "not_a_list"}})
         assert result is not None
-        assert result["data"]["valueLost"] == 0
-
-
-# ── PET parser ───────────────────────────────────────────────────────
-
-
-class TestPetParser:
-    def test_basic_pet(self):
-        extra: dict[str, Any] = {
-            "petName": "Ikkle hydra",
-            "milestone": "5,000 killcount",
-            "duplicate": False,
-        }
-        result = dispatch("PET", extra, "Player")
-        assert result is not None
-        assert "Ikkle hydra" in result["summary"]
-        assert result["data"]["petName"] == "Ikkle hydra"
-        assert result["data"]["milestone"] == "5,000 killcount"
-        assert result["data"]["duplicate"] is False
-
-    def test_duplicate_pet(self):
-        extra: dict[str, Any] = {"petName": "Baby mole", "duplicate": True}
-        result = dispatch("PET", extra, "Player")
-        assert result is not None
-        assert "duplicate" in result["summary"]
-
-    def test_no_pet_name(self):
-        result = dispatch("PET", {}, "Player")
-        assert result is not None
-        assert "received a pet" in result["summary"]
-
-    def test_no_milestone(self):
-        result = dispatch("PET", {"petName": "Vorki"}, "Player")
-        assert result is not None
-        assert "milestone" not in result["data"]
-
-
-# ── QUEST parser ─────────────────────────────────────────────────────
-
-
-class TestQuestParser:
-    def test_basic_quest(self):
-        extra: dict[str, Any] = {
-            "questName": "Dragon Slayer I",
-            "completedQuests": 22,
-            "totalQuests": 156,
-            "questPoints": 44,
-            "totalQuestPoints": 293,
-        }
-        result = dispatch("QUEST", extra, "Player")
-        assert result is not None
-        assert "Dragon Slayer I" in result["summary"]
-        assert result["data"]["completedQuests"] == 22
-        assert result["data"]["totalQuests"] == 156
-        assert result["data"]["questPoints"] == 44
-        assert result["data"]["totalQuestPoints"] == 293
-
-    def test_minimal_quest(self):
-        result = dispatch("QUEST", {"questName": "Cook's Assistant"}, "Player")
-        assert result is not None
-        assert "completedQuests" not in result["data"]
-
-
-# ── COMBAT_ACHIEVEMENT parser ────────────────────────────────────────
-
-
-class TestCombatAchievementParser:
-    def test_basic_task(self):
-        extra: dict[str, Any] = {
-            "tier": "GRANDMASTER",
-            "task": "Peach Conjurer",
-            "taskPoints": 6,
-            "totalPoints": 1337,
-            "currentTier": "MASTER",
-            "nextTier": "GRANDMASTER",
-        }
-        result = dispatch("COMBAT_ACHIEVEMENT", extra, "Player")
-        assert result is not None
-        assert "Peach Conjurer" in result["summary"]
-        assert "GRANDMASTER" in result["summary"]
-        assert result["data"]["tier"] == "GRANDMASTER"
-        assert result["data"]["taskPoints"] == 6
-        assert result["data"]["totalPoints"] == 1337
-        assert result["data"]["currentTier"] == "MASTER"
-
-    def test_just_completed_tier(self):
-        extra: dict[str, Any] = {
-            "tier": "GRANDMASTER",
-            "task": "Peach Conjurer",
-            "taskPoints": 6,
-            "totalPoints": 1465,
-            "nextTier": "GRANDMASTER",
-            "justCompletedTier": "MASTER",
-        }
-        result = dispatch("COMBAT_ACHIEVEMENT", extra, "Player")
-        assert result is not None
-        assert "MASTER" in result["summary"]
-        assert "completed" in result["summary"].lower()
-        assert result["data"]["justCompletedTier"] == "MASTER"
-
-    def test_minimal(self):
-        result = dispatch("COMBAT_ACHIEVEMENT", {}, "Player")
-        assert result is not None
-        assert result["data"]["tier"] == "Unknown"
-
-
-# ── ACHIEVEMENT_DIARY parser ────────────────────────────────────────
-
-
-class TestAchievementDiaryParser:
-    def test_basic_diary(self):
-        extra: dict[str, Any] = {
-            "area": "Varrock",
-            "difficulty": "HARD",
-            "total": 15,
-            "tasksCompleted": 152,
-            "tasksTotal": 492,
-            "areaTasksCompleted": 37,
-            "areaTasksTotal": 42,
-        }
-        result = dispatch("ACHIEVEMENT_DIARY", extra, "Player")
-        assert result is not None
-        assert "Varrock" in result["summary"]
-        assert "HARD" in result["summary"]
-        assert result["data"]["area"] == "Varrock"
-        assert result["data"]["difficulty"] == "HARD"
-        assert result["data"]["total"] == 15
-        assert result["data"]["tasksCompleted"] == 152
-        assert result["data"]["tasksTotal"] == 492
-        assert result["data"]["areaTasksCompleted"] == 37
-        assert result["data"]["areaTasksTotal"] == 42
-
-    def test_minimal_diary(self):
-        result = dispatch("ACHIEVEMENT_DIARY", {"area": "Lumbridge", "difficulty": "EASY"}, "Player")
-        assert result is not None
-        assert "total" not in result["data"]
-
-
-# ── COLLECTION parser ────────────────────────────────────────────────
-
-
-class TestCollectionParser:
-    def test_basic_collection(self):
-        extra: dict[str, Any] = {
-            "itemName": "Zamorak chaps",
-            "itemId": 10372,
-            "price": 500812,
-            "completedEntries": 420,
-            "totalEntries": 1443,
-            "currentRank": "IRON",
-            "rankProgress": 120,
-            "logsNeededForNextRank": 80,
-            "nextRank": "STEEL",
-            "justCompletedRank": "BRONZE",
-            "dropperName": "Clue Scroll (Hard)",
-            "dropperType": "EVENT",
-            "dropperKillCount": 1500,
-        }
-        result = dispatch("COLLECTION", extra, "Player")
-        assert result is not None
-        assert "Zamorak chaps" in result["summary"]
-        assert "collection log" in result["summary"]
-        assert result["data"]["itemName"] == "Zamorak chaps"
-        assert result["data"]["itemId"] == 10372
-        assert result["data"]["price"] == 500812
-        assert result["data"]["completedEntries"] == 420
-        assert result["data"]["totalEntries"] == 1443
-        assert result["data"]["currentRank"] == "IRON"
-        assert result["data"]["dropperName"] == "Clue Scroll (Hard)"
-        assert result["data"]["dropperType"] == "EVENT"
-        assert result["data"]["dropperKillCount"] == 1500
-
-    def test_collection_without_dropper(self):
-        extra: dict[str, Any] = {
-            "itemName": "Dragon pickaxe",
-            "itemId": 11920,
-            "price": 5000000,
-            "completedEntries": 100,
-            "totalEntries": 1443,
-        }
-        result = dispatch("COLLECTION", extra, "Player")
-        assert result is not None
-        assert result["data"]["itemName"] == "Dragon pickaxe"
-        assert "dropperName" not in result["data"]
-        assert "dropperType" not in result["data"]
-        assert "dropperKillCount" not in result["data"]
-
-    def test_minimal_collection(self):
-        result = dispatch("COLLECTION", {}, "Player")
-        assert result is not None
-        assert result["data"]["itemName"] == "Unknown"
-        assert "collection log" in result["summary"]
+        assert result["events"] == []

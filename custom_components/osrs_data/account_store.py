@@ -110,7 +110,7 @@ class AccountState:
 
 
 class AccountStore:
-    """In-memory store keyed by dinkAccountHash (fallback: playerName)."""
+    """In-memory store keyed by account identifier (fallback: playerName)."""
 
     def __init__(self) -> None:
         self._by_hash: dict[str, AccountState] = {}
