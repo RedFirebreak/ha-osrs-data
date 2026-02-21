@@ -319,3 +319,38 @@ class TestEventsParsing:
         # Empty list is falsy, so player-level events are used
         assert len(result["events"]) == 1
         assert result["events"][0]["type"] == "LOGIN"
+
+
+# ── tickDelay parsing ───────────────────────────────────────────────
+
+
+class TestTickDelayParsing:
+    def test_tick_delay_present(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": 20})
+        assert result is not None
+        assert result["tickDelay"] == 20
+
+    def test_tick_delay_absent(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+    def test_tick_delay_float_truncated(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": 15.7})
+        assert result is not None
+        assert result["tickDelay"] == 15
+
+    def test_tick_delay_zero_ignored(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": 0})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+    def test_tick_delay_negative_ignored(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": -5})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+    def test_tick_delay_string_ignored(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": "20"})
+        assert result is not None
+        assert result["tickDelay"] is None

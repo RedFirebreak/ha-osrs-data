@@ -161,14 +161,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.helpers.event import async_track_time_interval
 
     def _check_presence(_now: datetime) -> None:
-        """Mark accounts offline if no data received within timeout."""
+        """Mark accounts offline if no data received within timeout.
+
+        Uses the per-account dynamic timeout derived from ``tickDelay``
+        when available, otherwise falls back to *PRESENCE_TIMEOUT*.
+        """
         now = datetime.now(timezone.utc)
         for acct in account_store.accounts:
             if acct.is_online and acct.last_seen is not None:
                 elapsed = (now - acct.last_seen).total_seconds()
-                if elapsed > PRESENCE_TIMEOUT:
+                if elapsed > acct.presence_timeout:
                     acct.is_online = False
                     acct.offline_reason = "timeout"
+                    _LOGGER.debug(
+                        "Account %s timed out after %.1fs (limit %.1fs)",
+                        acct.player_name,
+                        elapsed,
+                        acct.presence_timeout,
+                    )
                     async_dispatcher_send(
                         hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
                     )

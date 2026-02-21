@@ -24,5 +24,11 @@ PAIRING_CODE_TTL = 300  # seconds (5 minutes)
 DEVICE_TOKEN_LENGTH = 64  # hex characters
 
 # Presence / online detection
-PRESENCE_TIMEOUT = 1500  # seconds (25 minutes) before marking offline
-PRESENCE_CHECK_INTERVAL = 60  # seconds between periodic checks
+PRESENCE_TIMEOUT = 1500  # seconds (25 minutes) — fallback when no tickDelay known
+PRESENCE_CHECK_INTERVAL = 5  # seconds between periodic checks
+
+# OSRS game tick duration in seconds
+TICK_DURATION = 0.6
+# Multiplier applied to tickDelay to compute the per-account timeout
+# timeout = floor(tickDelay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION)
+TICK_TIMEOUT_MULTIPLIER = 1.5

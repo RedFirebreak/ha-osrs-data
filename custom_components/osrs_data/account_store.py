@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
+
+# Import tick constants for timeout calculation
+from .const import PRESENCE_TIMEOUT, TICK_DURATION, TICK_TIMEOUT_MULTIPLIER
 
 
 def _normalize_player_name(name: str) -> str:
@@ -58,6 +62,9 @@ class AccountState:
         self.is_online: bool = False
         self.offline_reason: str | None = None
 
+        # Tick-based dynamic timeout (set from tickDelay in payload)
+        self.tick_delay: int | None = None
+
     def update_player_data(
         self,
         parsed: dict[str, Any],
@@ -74,6 +81,11 @@ class AccountState:
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
         self.events = parsed.get("events", [])
+
+        # Update tick delay if provided in this payload
+        new_tick_delay = parsed.get("tickDelay")
+        if new_tick_delay is not None:
+            self.tick_delay = new_tick_delay
         self.inventory = parsed.get("inventory", [])
         self.equipment = parsed.get("equipment", {})
         self.health = parsed.get("health", {"current": 0, "max": 0})
@@ -131,6 +143,20 @@ class AccountState:
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
 
+    @property
+    def presence_timeout(self) -> float:
+        """Compute the presence timeout in seconds.
+
+        When ``tick_delay`` is known, returns
+        ``floor(tick_delay * 1.5 * 0.6)``.
+        Otherwise falls back to the global ``PRESENCE_TIMEOUT`` (25 min).
+        """
+        if self.tick_delay is not None and self.tick_delay > 0:
+            return math.floor(
+                self.tick_delay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION
+            )
+        return PRESENCE_TIMEOUT
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
         return {
@@ -151,6 +177,7 @@ class AccountState:
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "is_online": self.is_online,
             "offline_reason": self.offline_reason,
+            "tick_delay": self.tick_delay,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -175,6 +202,7 @@ class AccountState:
             self.last_seen = datetime.fromisoformat(last_seen_raw)
         self.is_online = data.get("is_online", False)
         self.offline_reason = data.get("offline_reason")
+        self.tick_delay = data.get("tick_delay")
 
 
 class AccountStore:

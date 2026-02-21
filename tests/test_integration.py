@@ -433,3 +433,52 @@ class TestClientShutdownIntegration:
         await view.post(_make_json_request(hass, shutdown_payload, token))
         assert acct.is_online is False
         assert acct.offline_reason == "Shutdown"
+
+    @pytest.mark.asyncio
+    async def test_tick_delay_stored_through_api(self):
+        """tickDelay from RuneLite payload is stored on the account."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "PlayerOne",
+                "accountType": "normal",
+                "world": "302",
+                "stats": {"skills": {}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "events": [],
+            "tickDelay": 20,
+            "state": "LOGGED_IN",
+        }
+        r = await view.post(_make_json_request(hass, payload, token))
+        assert r.status == 200
+
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.tick_delay == 20
+        assert acct.presence_timeout == 18
+
+    @pytest.mark.asyncio
+    async def test_tick_delay_persisted_in_save(self):
+        """tickDelay is included in the save payload."""
+        hass, store, token, mock_storage = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "PlayerOne",
+                "accountType": "normal",
+                "world": "302",
+                "stats": {"skills": {}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "tickDelay": 20,
+        }
+        await view.post(_make_json_request(hass, payload, token))
+
+        save_callback = mock_storage.async_delay_save.call_args[0][0]
+        saved = save_callback()
+        assert saved["accounts"][0]["tick_delay"] == 20

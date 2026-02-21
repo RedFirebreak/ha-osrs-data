@@ -66,6 +66,9 @@ class OsrsOnlineBinarySensor(BinarySensorEntity):
             attrs["last_seen"] = self._state.last_seen.isoformat()
         if self._state.offline_reason is not None:
             attrs["status"] = self._state.offline_reason
+        if self._state.tick_delay is not None:
+            attrs["tick_delay"] = self._state.tick_delay
+        attrs["presence_timeout"] = self._state.presence_timeout
         return attrs
 
     @property

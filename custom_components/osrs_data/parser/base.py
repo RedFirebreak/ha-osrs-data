@@ -123,6 +123,14 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(events, list):
         events = []
 
+    # ── Tick delay (root-level) ──────────────────────────────────────
+    # Number of game ticks between plugin data messages.  Used to
+    # compute a per-account presence timeout (deadman's switch).
+    tick_delay: int | None = None
+    raw_tick = payload.get("tickDelay")
+    if isinstance(raw_tick, (int, float)) and raw_tick > 0:
+        tick_delay = int(raw_tick)
+
     return {
         "name": name,
         "accountType": account_type,
@@ -135,4 +143,5 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "location": location,
         "spellbook": spellbook,
         "events": events,
+        "tickDelay": tick_delay,
     }
