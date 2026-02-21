@@ -468,7 +468,7 @@ class TestPresenceConstants:
 
     def test_tick_timeout_multiplier(self):
         from custom_components.osrs_data.const import TICK_TIMEOUT_MULTIPLIER
-        assert TICK_TIMEOUT_MULTIPLIER == 1.5
+        assert TICK_TIMEOUT_MULTIPLIER == 3.1
 
 
 # ── Dynamic tick-based timeout tests ────────────────────────────────
@@ -483,42 +483,42 @@ class TestDynamicPresenceTimeout:
         assert state.tick_delay is None
         assert state.presence_timeout == 1500
 
-    def test_tick_delay_20_gives_18_seconds(self):
-        """tickDelay=20 → floor(20 * 1.5 * 0.6) = floor(18.0) = 18."""
+    def test_tick_delay_20_gives_37_seconds(self):
+        """tickDelay=20 → floor(20 * 3.1 * 0.6) = floor(37.2) = 37."""
         state = AccountState("hash1", "Player")
         state.tick_delay = 20
-        assert state.presence_timeout == 18
+        assert state.presence_timeout == 37
 
-    def test_tick_delay_10_gives_9_seconds(self):
-        """tickDelay=10 → floor(10 * 1.5 * 0.6) = floor(9.0) = 9."""
+    def test_tick_delay_10_gives_18_seconds(self):
+        """tickDelay=10 → floor(10 * 3.1 * 0.6) = floor(18.6) = 18."""
         state = AccountState("hash1", "Player")
         state.tick_delay = 10
-        assert state.presence_timeout == 9
+        assert state.presence_timeout == 18
 
-    def test_tick_delay_5_gives_4_seconds(self):
-        """tickDelay=5 → floor(5 * 1.5 * 0.6) = floor(4.5) = 4."""
+    def test_tick_delay_5_gives_9_seconds(self):
+        """tickDelay=5 → floor(5 * 3.1 * 0.6) = floor(9.3) = 9."""
         state = AccountState("hash1", "Player")
         state.tick_delay = 5
-        assert state.presence_timeout == 4
+        assert state.presence_timeout == 9
 
-    def test_tick_delay_1_gives_0_seconds(self):
-        """tickDelay=1 → floor(1 * 1.5 * 0.6) = floor(0.9) = 0."""
+    def test_tick_delay_1_gives_1_second(self):
+        """tickDelay=1 → floor(1 * 3.1 * 0.6) = floor(1.86) = 1."""
         state = AccountState("hash1", "Player")
         state.tick_delay = 1
-        assert state.presence_timeout == 0
+        assert state.presence_timeout == 1
 
-    def test_tick_delay_50_gives_45_seconds(self):
-        """tickDelay=50 → floor(50 * 1.5 * 0.6) = floor(45.0) = 45."""
+    def test_tick_delay_50_gives_93_seconds(self):
+        """tickDelay=50 → floor(50 * 3.1 * 0.6) = floor(93.0) = 93."""
         state = AccountState("hash1", "Player")
         state.tick_delay = 50
-        assert state.presence_timeout == 45
+        assert state.presence_timeout == 93
 
     def test_update_sets_tick_delay(self):
         """update_player_data stores tickDelay from parsed data."""
         state = AccountState("hash1", "Player")
         state.update_player_data({"tickDelay": 20})
         assert state.tick_delay == 20
-        assert state.presence_timeout == 18
+        assert state.presence_timeout == 37
 
     def test_update_without_tick_delay_preserves_existing(self):
         """An update without tickDelay keeps the previously set value."""
@@ -539,7 +539,7 @@ class TestDynamicPresenceTimeout:
         restored = AccountState("hash1", "Player")
         restored.load_dict(data)
         assert restored.tick_delay == 20
-        assert restored.presence_timeout == 18
+        assert restored.presence_timeout == 37
 
     def test_legacy_data_without_tick_delay(self):
         """Loading old data without tick_delay defaults to None."""
@@ -554,8 +554,8 @@ class TestDynamicPresenceTimeout:
         state.update_player_data({"tickDelay": 20})
         assert state.is_online is True
 
-        # Simulate last_seen being 19 seconds ago (past the 18s timeout)
-        state.last_seen = datetime.now(timezone.utc) - timedelta(seconds=19)
+        # Simulate last_seen being 38 seconds ago (past the 37s timeout)
+        state.last_seen = datetime.now(timezone.utc) - timedelta(seconds=38)
 
         now = datetime.now(timezone.utc)
         elapsed = (now - state.last_seen).total_seconds()
@@ -572,8 +572,8 @@ class TestDynamicPresenceTimeout:
         state.update_player_data({"tickDelay": 20})
         assert state.is_online is True
 
-        # Simulate last_seen being 10 seconds ago (within the 18s timeout)
-        state.last_seen = datetime.now(timezone.utc) - timedelta(seconds=10)
+        # Simulate last_seen being 30 seconds ago (within the 37s timeout)
+        state.last_seen = datetime.now(timezone.utc) - timedelta(seconds=30)
 
         now = datetime.now(timezone.utc)
         elapsed = (now - state.last_seen).total_seconds()
@@ -604,4 +604,4 @@ class TestBinarySensorTickDelayAttributes:
         sensor = OsrsOnlineBinarySensor(entry, state)
         attrs = sensor.extra_state_attributes
         assert attrs["tick_delay"] == 20
-        assert attrs["presence_timeout"] == 18
+        assert attrs["presence_timeout"] == 37

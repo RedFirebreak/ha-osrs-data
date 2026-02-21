@@ -31,4 +31,5 @@ PRESENCE_CHECK_INTERVAL = 5  # seconds between periodic checks
 TICK_DURATION = 0.6
 # Multiplier applied to tickDelay to compute the per-account timeout
 # timeout = floor(tickDelay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION)
-TICK_TIMEOUT_MULTIPLIER = 1.5
+# 3.1x allows ~2 missed messages of grace before marking offline.
+TICK_TIMEOUT_MULTIPLIER = 3.1

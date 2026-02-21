@@ -458,7 +458,7 @@ class TestClientShutdownIntegration:
 
         acct = store.get_or_create(None, "PlayerOne")
         assert acct.tick_delay == 20
-        assert acct.presence_timeout == 18
+        assert acct.presence_timeout == 37
 
     @pytest.mark.asyncio
     async def test_tick_delay_persisted_in_save(self):
