@@ -268,10 +268,10 @@ PLAYER_ONE_SHUTDOWN_PAYLOAD: dict[str, Any] = {
         },
         "inventory": {"items": []},
         "equipment": {"items": []},
-        "events": [
-            {"type": "ClientShutdown", "data": "Shutdown"},
-        ],
-    }
+    },
+    "events": [
+        {"type": "ClientShutdown", "data": "Shutdown"},
+    ],
 }
 
 PLAYER_ONE_LOGOUT_PAYLOAD: dict[str, Any] = {
@@ -282,10 +282,10 @@ PLAYER_ONE_LOGOUT_PAYLOAD: dict[str, Any] = {
         "stats": {"skills": {}},
         "inventory": {"items": []},
         "equipment": {"items": []},
-        "events": [
-            {"type": "LOGOUT"},
-        ],
-    }
+    },
+    "events": [
+        {"type": "LOGOUT"},
+    ],
 }
 
 
@@ -389,5 +389,47 @@ class TestClientShutdownIntegration:
         assert r.status == 200
 
         acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is False
+        assert acct.offline_reason == "Shutdown"
+
+    @pytest.mark.asyncio
+    async def test_realistic_runelite_shutdown_payload(self):
+        """Full realistic RuneLite payload with root-level ClientShutdown."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        # First: normal heartbeat
+        normal_payload: dict[str, Any] = {
+            "player": {
+                "name": "TestPlayer",
+                "accountType": "0",
+                "world": "395",
+                "stats": {"skills": {"Attack": {"xp": 6124520, "level": 91}}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "events": [],
+            "state": "LOGGED_IN",
+        }
+        await view.post(_make_json_request(hass, normal_payload, token))
+        acct = store.get_or_create(None, "TestPlayer")
+        assert acct.is_online is True
+
+        # Second: ClientShutdown at root level (real RuneLite format)
+        shutdown_payload: dict[str, Any] = {
+            "player": {
+                "name": "TestPlayer",
+                "accountType": "0",
+                "world": "395",
+                "stats": {"skills": {"Attack": {"xp": 6124520, "level": 91}}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "events": [
+                {"type": "ClientShutdown", "data": "Shutdown"},
+            ],
+            "state": "LOGGED_IN",
+        }
+        await view.post(_make_json_request(hass, shutdown_payload, token))
         assert acct.is_online is False
         assert acct.offline_reason == "Shutdown"

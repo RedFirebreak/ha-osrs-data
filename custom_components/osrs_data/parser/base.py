@@ -115,8 +115,11 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             "name": spellbook_data.get("name", ""),
         }
 
-    # ── Events (future use, initially empty) ─────────────────────────
-    events = player.get("events", [])
+    # ── Events ─────────────────────────────────────────────────────────
+    # The RuneLite plugin sends events at the root level of the payload
+    # (sibling of "player"), but earlier versions nested them inside
+    # "player".  Check both locations; root-level takes precedence.
+    events = payload.get("events") or player.get("events", [])
     if not isinstance(events, list):
         events = []
 

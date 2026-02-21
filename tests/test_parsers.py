@@ -270,3 +270,52 @@ class TestEventsParsing:
         result = parse({"player": {"name": "P", "events": "not_a_list"}})
         assert result is not None
         assert result["events"] == []
+
+    def test_root_level_events(self):
+        """Events at the root level (sibling of 'player') are parsed."""
+        result = parse({
+            "player": {"name": "P"},
+            "events": [{"type": "ClientShutdown", "data": "Shutdown"}],
+        })
+        assert result is not None
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "ClientShutdown"
+
+    def test_root_level_events_take_precedence(self):
+        """Root-level events take precedence over player-level events."""
+        result = parse({
+            "player": {
+                "name": "P",
+                "events": [{"type": "LOGIN"}],
+            },
+            "events": [{"type": "LOGOUT"}],
+        })
+        assert result is not None
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "LOGOUT"
+
+    def test_player_level_events_fallback(self):
+        """Player-level events are used when root-level events are absent."""
+        result = parse({
+            "player": {
+                "name": "P",
+                "events": [{"type": "LOGIN"}],
+            },
+        })
+        assert result is not None
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "LOGIN"
+
+    def test_root_level_empty_list_falls_back_to_player(self):
+        """An empty root-level events list falls back to player-level."""
+        result = parse({
+            "player": {
+                "name": "P",
+                "events": [{"type": "LOGIN"}],
+            },
+            "events": [],
+        })
+        assert result is not None
+        # Empty list is falsy, so player-level events are used
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "LOGIN"
