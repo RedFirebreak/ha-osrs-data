@@ -22,3 +22,7 @@ SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
 PAIRING_CODE_LENGTH = 5
 PAIRING_CODE_TTL = 300  # seconds (5 minutes)
 DEVICE_TOKEN_LENGTH = 64  # hex characters
+
+# Presence / online detection
+PRESENCE_TIMEOUT = 1500  # seconds (25 minutes) before marking offline
+PRESENCE_CHECK_INTERVAL = 60  # seconds between periodic checks

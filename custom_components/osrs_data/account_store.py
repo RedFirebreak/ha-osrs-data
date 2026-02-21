@@ -50,6 +50,11 @@ class AccountState:
 
         self.last_update: str | None = None
 
+        # Presence tracking
+        self.last_seen: datetime | None = None
+        self.is_online: bool = False
+        self.offline_reason: str | None = None
+
     def update_player_data(
         self,
         parsed: dict[str, Any],
@@ -61,6 +66,11 @@ class AccountState:
 
         now = datetime.now(timezone.utc).isoformat()
         self.last_update = now
+
+        # Presence: any data update is a heartbeat
+        self.last_seen = datetime.now(timezone.utc)
+        self.is_online = True
+        self.offline_reason = None
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
@@ -92,6 +102,17 @@ class AccountState:
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
 
+        # Handle LOGIN/LOGOUT events for immediate presence updates
+        for event in self.events:
+            if isinstance(event, dict):
+                etype = event.get("type", "").upper()
+                if etype == "LOGOUT":
+                    self.is_online = False
+                    self.offline_reason = "logout"
+                elif etype == "LOGIN":
+                    self.is_online = True
+                    self.offline_reason = None
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
         return {
@@ -109,6 +130,9 @@ class AccountState:
             "events": self.events,
             "detail_sensors": self.detail_sensors,
             "last_update": self.last_update,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "is_online": self.is_online,
+            "offline_reason": self.offline_reason,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -126,6 +150,13 @@ class AccountState:
         self.events = data.get("events", [])
         self.detail_sensors = data.get("detail_sensors", {})
         self.last_update = data.get("last_update")
+
+        # Presence tracking
+        last_seen_raw = data.get("last_seen")
+        if last_seen_raw:
+            self.last_seen = datetime.fromisoformat(last_seen_raw)
+        self.is_online = data.get("is_online", False)
+        self.offline_reason = data.get("offline_reason")
 
 
 class AccountStore:
