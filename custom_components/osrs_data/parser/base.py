@@ -131,6 +131,25 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(raw_tick, (int, float)) and raw_tick > 0:
         tick_delay = int(raw_tick)
 
+    # ── Game state (root-level) ──────────────────────────────────────
+    # The RuneLite client's current game state (e.g. LOGGED_IN,
+    # LOGIN_SCREEN, CONNECTION_LOST).  Defaults to UNKNOWN.
+    _VALID_GAME_STATES = {
+        "UNKNOWN",
+        "STARTING",
+        "LOGIN_SCREEN",
+        "LOGIN_SCREEN_AUTHENTICATOR",
+        "LOGGING_IN",
+        "LOADING",
+        "LOGGED_IN",
+        "CONNECTION_LOST",
+        "HOPPING",
+    }
+    raw_state = payload.get("state")
+    game_state: str = "UNKNOWN"
+    if isinstance(raw_state, str) and raw_state.upper() in _VALID_GAME_STATES:
+        game_state = raw_state.upper()
+
     return {
         "name": name,
         "accountType": account_type,
@@ -144,4 +163,5 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "spellbook": spellbook,
         "events": events,
         "tickDelay": tick_delay,
+        "state": game_state,
     }

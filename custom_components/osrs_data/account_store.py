@@ -52,6 +52,9 @@ class AccountState:
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
 
+        # Game state: current RuneLite client state (e.g. LOGGED_IN)
+        self.game_state: str = "UNKNOWN"
+
         # Detail sensors: key → {value, attributes, last_update}
         self.detail_sensors: dict[str, dict[str, Any]] = {}
 
@@ -86,6 +89,10 @@ class AccountState:
         new_tick_delay = parsed.get("tickDelay")
         if new_tick_delay is not None:
             self.tick_delay = new_tick_delay
+
+        # Update game state
+        self.game_state = parsed.get("state", "UNKNOWN")
+
         self.inventory = parsed.get("inventory", [])
         self.equipment = parsed.get("equipment", {})
         self.health = parsed.get("health", {"current": 0, "max": 0})
@@ -172,6 +179,7 @@ class AccountState:
             "location": self.location,
             "spellbook": self.spellbook,
             "events": self.events,
+            "game_state": self.game_state,
             "detail_sensors": self.detail_sensors,
             "last_update": self.last_update,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
@@ -193,6 +201,7 @@ class AccountState:
         self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
         self.spellbook = data.get("spellbook", {"id": 0, "name": ""})
         self.events = data.get("events", [])
+        self.game_state = data.get("game_state", "UNKNOWN")
         self.detail_sensors = data.get("detail_sensors", {})
         self.last_update = data.get("last_update")
 

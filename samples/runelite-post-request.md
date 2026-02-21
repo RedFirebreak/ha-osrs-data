@@ -84,7 +84,8 @@ X-Osrs-Token: <device-token>
             ]
         },
         "events": []
-    }
+    },
+    "state": "LOGGED_IN"
 }
 ```
 
@@ -98,6 +99,7 @@ X-Osrs-Token: <device-token>
 | Prayer Points | Current prayer points | `current`, `max`, `last_update` |
 | Location | Tile coordinates (x, y) | `x`, `y`, `plane`, `last_update` |
 | Spellbook | Active spellbook name | `id`, `last_update` |
+| Game State | RuneLite client game state | `last_update` |
 | Equipment | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
 | `<Skill> XP` | XP value | `skill` |
 | `<Skill> Level` | Level value | `skill` |

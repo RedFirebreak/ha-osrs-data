@@ -354,3 +354,73 @@ class TestTickDelayParsing:
         result = parse({"player": {"name": "P"}, "tickDelay": "20"})
         assert result is not None
         assert result["tickDelay"] is None
+
+
+# ── state parsing ───────────────────────────────────────────────────
+
+
+class TestStateParsing:
+    def test_state_present(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGGED_IN"})
+        assert result is not None
+        assert result["state"] == "LOGGED_IN"
+
+    def test_state_absent_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"
+
+    def test_state_case_insensitive(self):
+        result = parse({"player": {"name": "P"}, "state": "logged_in"})
+        assert result is not None
+        assert result["state"] == "LOGGED_IN"
+
+    def test_state_login_screen(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGIN_SCREEN"})
+        assert result is not None
+        assert result["state"] == "LOGIN_SCREEN"
+
+    def test_state_login_screen_authenticator(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGIN_SCREEN_AUTHENTICATOR"})
+        assert result is not None
+        assert result["state"] == "LOGIN_SCREEN_AUTHENTICATOR"
+
+    def test_state_connection_lost(self):
+        result = parse({"player": {"name": "P"}, "state": "CONNECTION_LOST"})
+        assert result is not None
+        assert result["state"] == "CONNECTION_LOST"
+
+    def test_state_hopping(self):
+        result = parse({"player": {"name": "P"}, "state": "HOPPING"})
+        assert result is not None
+        assert result["state"] == "HOPPING"
+
+    def test_state_starting(self):
+        result = parse({"player": {"name": "P"}, "state": "STARTING"})
+        assert result is not None
+        assert result["state"] == "STARTING"
+
+    def test_state_loading(self):
+        result = parse({"player": {"name": "P"}, "state": "LOADING"})
+        assert result is not None
+        assert result["state"] == "LOADING"
+
+    def test_state_logging_in(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGGING_IN"})
+        assert result is not None
+        assert result["state"] == "LOGGING_IN"
+
+    def test_invalid_state_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}, "state": "INVALID_STATE"})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"
+
+    def test_state_non_string_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}, "state": 123})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"
+
+    def test_state_empty_string_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}, "state": ""})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"

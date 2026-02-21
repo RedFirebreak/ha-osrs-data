@@ -48,6 +48,7 @@ class TestAccountStatePersistence:
         assert restored.inventory == []
         assert restored.equipment == {}
         assert restored.events == []
+        assert restored.game_state == "UNKNOWN"
         assert restored.last_update is None
         assert restored.detail_sensors == {}
 
@@ -95,6 +96,19 @@ class TestAccountStatePersistence:
         restored.load_dict(data)
 
         assert restored.skills == {"Attack": {"xp": 1000, "level": 10}}
+
+    def test_roundtrip_game_state(self):
+        """Game state persists correctly through a roundtrip."""
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"state": "LOGGED_IN"})
+
+        data = state.to_dict()
+        assert data["game_state"] == "LOGGED_IN"
+
+        restored = AccountState("hash1", "placeholder")
+        restored.load_dict(data)
+
+        assert restored.game_state == "LOGGED_IN"
 
 
 class TestAccountStorePersistence:

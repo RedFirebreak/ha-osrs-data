@@ -60,6 +60,7 @@ async def async_setup_entry(
             new_entities.append(OsrsPrayerPointsSensor(entry, state, slug))
             new_entities.append(OsrsLocationSensor(entry, state, slug))
             new_entities.append(OsrsSpellbookSensor(entry, state, slug))
+            new_entities.append(OsrsGameStateSensor(entry, state, slug))
 
         # Create detail sensors for any new keys (skill xp & level)
         for key in state.detail_sensors:
@@ -464,6 +465,54 @@ class OsrsEquipmentSensor(SensorEntity):
         attrs: dict[str, Any] = {}
         for slot in EQUIPMENT_SLOTS:
             attrs[slot] = self._state.equipment.get(slot, {})
+        if self._state.last_update:
+            attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Game State sensor ───────────────────────────────────────────────
+
+
+class OsrsGameStateSensor(SensorEntity):
+    """Sensor whose state is the RuneLite client game state."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Game State"
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_game_state"
+
+    @property
+    def native_value(self) -> str:
+        """Current game state."""
+        return self._state.game_state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {}
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
         return attrs
