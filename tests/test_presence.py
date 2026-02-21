@@ -104,7 +104,7 @@ class TestAccountStatePresence:
         state.update_player_data({"accountType": "normal"})
         assert state.is_online is True
         assert state.last_seen is not None
-        assert state.offline_reason is None
+        assert state.offline_reason == "online"
 
     def test_update_refreshes_last_seen(self):
         state = AccountState("hash1", "Player")
@@ -139,7 +139,7 @@ class TestAccountStatePresence:
             "events": [{"type": "LOGIN"}],
         })
         assert state.is_online is True
-        assert state.offline_reason is None
+        assert state.offline_reason == "online"
 
     def test_logout_event_case_insensitive(self):
         """LOGOUT event type comparison is case-insensitive."""
@@ -162,6 +162,70 @@ class TestAccountStatePresence:
         })
         assert state.is_online is True
 
+    def test_client_shutdown_sets_offline(self):
+        """ClientShutdown event immediately sets the sensor to offline."""
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"accountType": "normal"})
+        assert state.is_online is True
+
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "ClientShutdown", "data": "Shutdown"}],
+        })
+        assert state.is_online is False
+        assert state.offline_reason == "Shutdown"
+
+    def test_client_shutdown_custom_data(self):
+        """ClientShutdown data field is stored as the offline reason."""
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"accountType": "normal"})
+
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "ClientShutdown", "data": "Crash"}],
+        })
+        assert state.is_online is False
+        assert state.offline_reason == "Crash"
+
+    def test_client_shutdown_without_data(self):
+        """ClientShutdown without data field defaults to 'shutdown'."""
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"accountType": "normal"})
+
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "ClientShutdown"}],
+        })
+        assert state.is_online is False
+        assert state.offline_reason == "shutdown"
+
+    def test_client_shutdown_case_insensitive(self):
+        """ClientShutdown event type is case-insensitive."""
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"accountType": "normal"})
+
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "clientshutdown", "data": "Shutdown"}],
+        })
+        assert state.is_online is False
+        assert state.offline_reason == "Shutdown"
+
+    def test_online_after_client_shutdown(self):
+        """New data after ClientShutdown sets the account back online."""
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "ClientShutdown", "data": "Shutdown"}],
+        })
+        assert state.is_online is False
+        assert state.offline_reason == "Shutdown"
+
+        # New data arrives — no shutdown event
+        state.update_player_data({"accountType": "normal"})
+        assert state.is_online is True
+        assert state.offline_reason == "online"
+
 
 class TestAccountStatePresencePersistence:
     """Tests for presence field serialization."""
@@ -174,13 +238,13 @@ class TestAccountStatePresencePersistence:
         data = state.to_dict()
         assert data["is_online"] is True
         assert data["last_seen"] is not None
-        assert data["offline_reason"] is None
+        assert data["offline_reason"] == "online"
 
         restored = AccountState("hash1", "Player")
         restored.load_dict(data)
         assert restored.is_online is True
         assert restored.last_seen is not None
-        assert restored.offline_reason is None
+        assert restored.offline_reason == "online"
 
     def test_roundtrip_offline_state(self):
         state = AccountState("hash1", "Player")
@@ -254,7 +318,7 @@ class TestPresenceTimeout:
             state.offline_reason = "timeout"
 
         assert state.is_online is True
-        assert state.offline_reason is None
+        assert state.offline_reason == "online"
 
     def test_already_offline_account_not_rechecked(self):
         """An account already offline should not be re-flagged."""
@@ -318,7 +382,7 @@ class TestOsrsOnlineBinarySensor:
         })
         sensor = OsrsOnlineBinarySensor(entry, state)
         attrs = sensor.extra_state_attributes
-        assert attrs["offline_reason"] == "logout"
+        assert attrs["status"] == "logout"
 
     def test_attributes_empty_when_no_data(self):
         entry = _make_entry()
@@ -326,7 +390,46 @@ class TestOsrsOnlineBinarySensor:
         sensor = OsrsOnlineBinarySensor(entry, state)
         attrs = sensor.extra_state_attributes
         assert "last_seen" not in attrs
-        assert "offline_reason" not in attrs
+        assert "status" not in attrs
+
+    def test_status_is_online_when_online(self):
+        """Status attribute shows 'online' when the account is online."""
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"accountType": "normal"})
+        sensor = OsrsOnlineBinarySensor(entry, state)
+        attrs = sensor.extra_state_attributes
+        assert attrs["status"] == "online"
+
+    def test_status_shows_shutdown_data(self):
+        """Status attribute shows the ClientShutdown data value when offline."""
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "ClientShutdown", "data": "Shutdown"}],
+        })
+        sensor = OsrsOnlineBinarySensor(entry, state)
+        attrs = sensor.extra_state_attributes
+        assert attrs["status"] == "Shutdown"
+        assert sensor.is_on is False
+
+    def test_status_returns_to_online(self):
+        """Status attribute returns to 'online' after recovery from ClientShutdown."""
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "accountType": "normal",
+            "events": [{"type": "ClientShutdown", "data": "Shutdown"}],
+        })
+        sensor = OsrsOnlineBinarySensor(entry, state)
+        assert sensor.is_on is False
+        assert sensor.extra_state_attributes["status"] == "Shutdown"
+
+        # New data arrives
+        state.update_player_data({"accountType": "normal"})
+        assert sensor.is_on is True
+        assert sensor.extra_state_attributes["status"] == "online"
 
     def test_reflects_state_changes(self):
         """Sensor reflects the underlying state changes."""

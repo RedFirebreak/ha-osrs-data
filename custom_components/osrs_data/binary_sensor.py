@@ -65,7 +65,7 @@ class OsrsOnlineBinarySensor(BinarySensorEntity):
         if self._state.last_seen is not None:
             attrs["last_seen"] = self._state.last_seen.isoformat()
         if self._state.offline_reason is not None:
-            attrs["offline_reason"] = self._state.offline_reason
+            attrs["status"] = self._state.offline_reason
         return attrs
 
     @property

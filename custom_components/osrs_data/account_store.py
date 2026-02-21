@@ -70,7 +70,7 @@ class AccountState:
         # Presence: any data update is a heartbeat
         self.last_seen = datetime.now(timezone.utc)
         self.is_online = True
-        self.offline_reason = None
+        self.offline_reason = "online"
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
@@ -102,16 +102,20 @@ class AccountState:
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
 
-        # Handle LOGIN/LOGOUT events for immediate presence updates
+        # Handle LOGIN/LOGOUT/ClientShutdown events for immediate presence updates
         for event in self.events:
             if isinstance(event, dict):
-                etype = event.get("type", "").upper()
-                if etype == "LOGOUT":
+                etype = event.get("type", "")
+                etype_upper = etype.upper()
+                if etype_upper == "LOGOUT":
                     self.is_online = False
                     self.offline_reason = "logout"
-                elif etype == "LOGIN":
+                elif etype_upper == "CLIENTSHUTDOWN":
+                    self.is_online = False
+                    self.offline_reason = event.get("data", "shutdown")
+                elif etype_upper == "LOGIN":
                     self.is_online = True
-                    self.offline_reason = None
+                    self.offline_reason = "online"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
