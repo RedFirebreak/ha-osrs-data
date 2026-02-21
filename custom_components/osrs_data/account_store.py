@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_player_name(name: str) -> str:
@@ -66,11 +69,7 @@ class AccountState:
 
         now = datetime.now(timezone.utc).isoformat()
         self.last_update = now
-
-        # Presence: any data update is a heartbeat
         self.last_seen = datetime.now(timezone.utc)
-        self.is_online = True
-        self.offline_reason = "online"
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
@@ -81,6 +80,36 @@ class AccountState:
         self.prayer_points = parsed.get("prayerPoints", {"current": 0, "max": 0})
         self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
         self.spellbook = parsed.get("spellbook", {"id": 0, "name": ""})
+
+        # Determine presence: default to online (heartbeat), then let
+        # events override.  This block runs BEFORE skill processing so
+        # an exception in skill parsing can never prevent a shutdown /
+        # logout event from being honoured.
+        self.is_online = True
+        self.offline_reason = "online"
+
+        for event in self.events:
+            if isinstance(event, dict):
+                etype = event.get("type", "")
+                etype_upper = etype.upper()
+                if etype_upper == "LOGOUT":
+                    self.is_online = False
+                    self.offline_reason = "logout"
+                    _LOGGER.debug(
+                        "Account %s marked offline (logout event)",
+                        self.player_name,
+                    )
+                elif etype_upper == "CLIENTSHUTDOWN":
+                    self.is_online = False
+                    self.offline_reason = event.get("data", "shutdown")
+                    _LOGGER.debug(
+                        "Account %s marked offline (ClientShutdown: %s)",
+                        self.player_name,
+                        self.offline_reason,
+                    )
+                elif etype_upper == "LOGIN":
+                    self.is_online = True
+                    self.offline_reason = "online"
 
         # Update skills and detail sensors
         new_skills = parsed.get("skills", {})
@@ -101,21 +130,6 @@ class AccountState:
                 }
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
-
-        # Handle LOGIN/LOGOUT/ClientShutdown events for immediate presence updates
-        for event in self.events:
-            if isinstance(event, dict):
-                etype = event.get("type", "")
-                etype_upper = etype.upper()
-                if etype_upper == "LOGOUT":
-                    self.is_online = False
-                    self.offline_reason = "logout"
-                elif etype_upper == "CLIENTSHUTDOWN":
-                    self.is_online = False
-                    self.offline_reason = event.get("data", "shutdown")
-                elif etype_upper == "LOGIN":
-                    self.is_online = True
-                    self.offline_reason = "online"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
