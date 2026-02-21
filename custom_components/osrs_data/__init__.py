@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import voluptuous as vol
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
@@ -158,8 +158,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # ── Periodic presence check ─────────────────────────────────────
-    import datetime as _dt
-
     from homeassistant.helpers.event import async_track_time_interval
 
     def _check_presence(_now: datetime) -> None:
@@ -176,7 +174,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
 
     unsub_presence = async_track_time_interval(
-        hass, _check_presence, _dt.timedelta(seconds=PRESENCE_CHECK_INTERVAL)
+        hass, _check_presence, timedelta(seconds=PRESENCE_CHECK_INTERVAL)
     )
     entry.async_on_unload(unsub_presence)
 
