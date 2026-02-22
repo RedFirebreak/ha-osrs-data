@@ -280,11 +280,10 @@ Fired when loot is received from a player kill. Same structure as `loot` but wit
         },
         "totalValue": 35,
         "source": {
-          "text": "Guard",
-          "link": "https://oldschool.runescape.wiki/w/Special:Search?search=Guard"
+          "text": "PlayerName",
+          "link": ""
         },
         "type": "PLAYER",
-        "npcId": 11916,
         "criteria": []
       }
     }

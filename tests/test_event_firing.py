@@ -200,7 +200,8 @@ PAYLOAD_WITH_MULTIPLE_EVENTS: dict[str, Any] = {
 }
 
 PAYLOAD_NO_EVENTS: dict[str, Any] = {
-    "player": {**_BASE_PLAYER, "events": []},
+    "player": _BASE_PLAYER,
+    "events": [],
 }
 
 PAYLOAD_WITH_EVENT_ID: dict[str, Any] = {
