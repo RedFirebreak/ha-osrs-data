@@ -128,6 +128,7 @@ The RuneLite plugin sends events in the `events[]` array of each payload. The in
 |---|---|---|
 | `clientShutdown` | `CLIENTSHUTDOWN` | Client/logout — marks account offline |
 | `death` | `DEATH` | Player death with kept/lost items and killer info |
+| `levelUp` | `LEVELUP` | In-game level up for one or more skills |
 | `loot` | `LOOT` | NPC or other loot drop |
 | `pkLoot` | `PKLOOT` | PvP loot (player kill) |
 
@@ -193,6 +194,26 @@ Fired when the player dies. Contains kept/lost items, killer info, value lost, a
           "plane": 0
         }
       }
+    }
+  ]
+}
+```
+
+#### levelUp
+
+Fired when the player levels up one or more skills in-game. The `data` field is a list because multiple level-ups can be sent at once.
+
+```json
+{
+  "events": [
+    {
+      "type": "levelUp",
+      "data": [
+        {
+          "skill": "sailing",
+          "level": 75
+        }
+      ]
     }
   ]
 }

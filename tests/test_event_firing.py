@@ -191,6 +191,31 @@ PAYLOAD_WITH_CLIENTSHUTDOWN: dict[str, Any] = {
     ],
 }
 
+PAYLOAD_WITH_LEVELUP: dict[str, Any] = {
+    "player": _BASE_PLAYER,
+    "events": [
+        {
+            "type": "levelUp",
+            "data": [
+                {"skill": "sailing", "level": 75},
+            ],
+        },
+    ],
+}
+
+PAYLOAD_WITH_MULTI_LEVELUP: dict[str, Any] = {
+    "player": _BASE_PLAYER,
+    "events": [
+        {
+            "type": "levelUp",
+            "data": [
+                {"skill": "attack", "level": 60},
+                {"skill": "strength", "level": 55},
+            ],
+        },
+    ],
+}
+
 PAYLOAD_WITH_MULTIPLE_EVENTS: dict[str, Any] = {
     "player": _BASE_PLAYER,
     "events": [
@@ -396,6 +421,38 @@ class TestPerEventFiring:
         await view.post(_make_json_request(hass, PAYLOAD_WITH_CLIENTSHUTDOWN, token))
         assert acct.is_online is False
         assert acct.offline_reason == "Logout"
+
+    @pytest.mark.asyncio
+    async def test_levelup_event_parsed_correctly(self):
+        """Realistic levelUp event fires with correct type and list data."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        request = _make_json_request(hass, PAYLOAD_WITH_LEVELUP, token)
+        await view.post(request)
+
+        calls = hass.bus.async_fire.call_args_list
+        per_event = calls[1][0][1]
+        assert per_event["event_type"] == "LEVELUP"
+        assert isinstance(per_event["event_data"], list)
+        assert len(per_event["event_data"]) == 1
+        assert per_event["event_data"][0]["skill"] == "sailing"
+        assert per_event["event_data"][0]["level"] == 75
+
+    @pytest.mark.asyncio
+    async def test_levelup_multiple_skills_parsed_correctly(self):
+        """levelUp event with multiple skills in data list."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        request = _make_json_request(hass, PAYLOAD_WITH_MULTI_LEVELUP, token)
+        await view.post(request)
+
+        calls = hass.bus.async_fire.call_args_list
+        per_event = calls[1][0][1]
+        assert per_event["event_type"] == "LEVELUP"
+        assert isinstance(per_event["event_data"], list)
+        assert len(per_event["event_data"]) == 2
+        assert per_event["event_data"][0]["skill"] == "attack"
+        assert per_event["event_data"][1]["skill"] == "strength"
 
 
 # ── Event deduplication tests ────────────────────────────────────────
