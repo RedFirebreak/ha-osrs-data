@@ -26,6 +26,7 @@ from .const import (
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
     DATA_DEDUPE_CACHE,
+    DATA_EVENT_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
     PAIRING_CODE_TTL,
@@ -259,6 +260,29 @@ class OsrsEventsView(HomeAssistantView):
 
             event_data = _build_normalized_event(parsed)
             hass.bus.async_fire(EVENT_TYPE, event_data)
+
+            # Fire individual HA events for each entry in the events list
+            received_at = event_data["received_at"]
+            event_dedupe = entry_data.get(DATA_EVENT_DEDUPE_CACHE)
+            events_list = parsed.get("events", [])
+            for ev in events_list:
+                if not isinstance(ev, dict):
+                    continue
+                ev_type = ev.get("type", "UNKNOWN").upper()
+                # Per-event deduplication
+                if event_dedupe is not None and event_dedupe.is_duplicate(
+                    player_name, ev
+                ):
+                    continue
+                hass.bus.async_fire(EVENT_TYPE, {
+                    "account_name": player_name,
+                    "event_type": ev_type,
+                    "event_data": ev.get("data", {}),
+                    "received_at": received_at,
+                })
+                # Update event totals on account state
+                if store is not None:
+                    acct.record_event(ev_type)
 
             return self.json({"ok": True})
         except Exception as exc:

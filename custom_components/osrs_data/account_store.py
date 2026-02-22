@@ -68,6 +68,9 @@ class AccountState:
         # Tick-based dynamic timeout (set from tickDelay in payload)
         self.tick_delay: int | None = None
 
+        # Event totals: {event_type: {"count": int, "last_fired": iso_str}}
+        self.event_totals: dict[str, dict[str, Any]] = {}
+
     def update_player_data(
         self,
         parsed: dict[str, Any],
@@ -150,6 +153,16 @@ class AccountState:
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
 
+    def record_event(self, event_type: str) -> None:
+        """Increment the counter for *event_type* and update last_fired."""
+        now = datetime.now(timezone.utc).isoformat()
+        entry = self.event_totals.get(event_type)
+        if entry is None:
+            self.event_totals[event_type] = {"count": 1, "last_fired": now}
+        else:
+            entry["count"] = entry.get("count", 0) + 1
+            entry["last_fired"] = now
+
     @property
     def presence_timeout(self) -> float:
         """Compute the presence timeout in seconds.
@@ -186,6 +199,7 @@ class AccountState:
             "is_online": self.is_online,
             "offline_reason": self.offline_reason,
             "tick_delay": self.tick_delay,
+            "event_totals": self.event_totals,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -212,6 +226,7 @@ class AccountState:
         self.is_online = data.get("is_online", False)
         self.offline_reason = data.get("offline_reason")
         self.tick_delay = data.get("tick_delay")
+        self.event_totals = data.get("event_totals", {})
 
 
 class AccountStore:
