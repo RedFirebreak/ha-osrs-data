@@ -91,9 +91,26 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **Prayer Points** | Current prayer points | `current`, `max`, `last_update` |
 | **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update` |
 | **Spellbook** | Active spellbook name | `id`, `last_update` |
+| **Game State** | RuneLite client game state | `last_update` |
 | **\<Skill\> Level** *(per skill)* | Skill level | `xp`, `last_update` |
 
 Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account.
+
+### Game State Values
+
+The **Game State** sensor reflects the RuneLite client's current state. Possible values:
+
+| State | Description |
+|-------|-------------|
+| `UNKNOWN` | Unknown game state |
+| `STARTING` | The client is starting |
+| `LOGIN_SCREEN` | The client is at the login screen |
+| `LOGIN_SCREEN_AUTHENTICATOR` | The client is at the login screen entering authenticator code |
+| `LOGGING_IN` | There is a player logging in |
+| `LOADING` | The game is being loaded |
+| `LOGGED_IN` | The user has successfully logged in |
+| `CONNECTION_LOST` | Connection to the server was lost |
+| `HOPPING` | A world hop is taking place |
 
 ### Persistence
 

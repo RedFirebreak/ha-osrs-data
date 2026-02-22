@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
+
+# Import tick constants for timeout calculation
+from .const import PRESENCE_TIMEOUT, TICK_DURATION, TICK_TIMEOUT_MULTIPLIER
 
 
 def _normalize_player_name(name: str) -> str:
@@ -45,10 +52,21 @@ class AccountState:
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
 
+        # Game state: current RuneLite client state (e.g. LOGGED_IN)
+        self.game_state: str = "UNKNOWN"
+
         # Detail sensors: key → {value, attributes, last_update}
         self.detail_sensors: dict[str, dict[str, Any]] = {}
 
         self.last_update: str | None = None
+
+        # Presence tracking
+        self.last_seen: datetime | None = None
+        self.is_online: bool = False
+        self.offline_reason: str | None = None
+
+        # Tick-based dynamic timeout (set from tickDelay in payload)
+        self.tick_delay: int | None = None
 
     def update_player_data(
         self,
@@ -61,16 +79,56 @@ class AccountState:
 
         now = datetime.now(timezone.utc).isoformat()
         self.last_update = now
+        self.last_seen = datetime.now(timezone.utc)
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
         self.events = parsed.get("events", [])
+
+        # Update tick delay if provided in this payload
+        new_tick_delay = parsed.get("tickDelay")
+        if new_tick_delay is not None:
+            self.tick_delay = new_tick_delay
+
+        # Update game state
+        self.game_state = parsed.get("state", "UNKNOWN")
+
         self.inventory = parsed.get("inventory", [])
         self.equipment = parsed.get("equipment", {})
         self.health = parsed.get("health", {"current": 0, "max": 0})
         self.prayer_points = parsed.get("prayerPoints", {"current": 0, "max": 0})
         self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
         self.spellbook = parsed.get("spellbook", {"id": 0, "name": ""})
+
+        # Determine presence: default to online (heartbeat), then let
+        # events override.  This block runs BEFORE skill processing so
+        # an exception in skill parsing can never prevent a shutdown /
+        # logout event from being honoured.
+        self.is_online = True
+        self.offline_reason = "online"
+
+        for event in self.events:
+            if isinstance(event, dict):
+                etype = event.get("type", "")
+                etype_upper = etype.upper()
+                if etype_upper == "LOGOUT":
+                    self.is_online = False
+                    self.offline_reason = "logout"
+                    _LOGGER.debug(
+                        "Account %s marked offline (logout event)",
+                        self.player_name,
+                    )
+                elif etype_upper == "CLIENTSHUTDOWN":
+                    self.is_online = False
+                    self.offline_reason = event.get("data", "shutdown")
+                    _LOGGER.debug(
+                        "Account %s marked offline (ClientShutdown: %s)",
+                        self.player_name,
+                        self.offline_reason,
+                    )
+                elif etype_upper == "LOGIN":
+                    self.is_online = True
+                    self.offline_reason = "online"
 
         # Update skills and detail sensors
         new_skills = parsed.get("skills", {})
@@ -92,6 +150,20 @@ class AccountState:
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
 
+    @property
+    def presence_timeout(self) -> float:
+        """Compute the presence timeout in seconds.
+
+        When ``tick_delay`` is known, returns
+        ``floor(tick_delay * 1.5 * 0.6)``.
+        Otherwise falls back to the global ``PRESENCE_TIMEOUT`` (25 min).
+        """
+        if self.tick_delay is not None and self.tick_delay > 0:
+            return math.floor(
+                self.tick_delay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION
+            )
+        return PRESENCE_TIMEOUT
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
         return {
@@ -107,8 +179,13 @@ class AccountState:
             "location": self.location,
             "spellbook": self.spellbook,
             "events": self.events,
+            "game_state": self.game_state,
             "detail_sensors": self.detail_sensors,
             "last_update": self.last_update,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "is_online": self.is_online,
+            "offline_reason": self.offline_reason,
+            "tick_delay": self.tick_delay,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -124,8 +201,17 @@ class AccountState:
         self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
         self.spellbook = data.get("spellbook", {"id": 0, "name": ""})
         self.events = data.get("events", [])
+        self.game_state = data.get("game_state", "UNKNOWN")
         self.detail_sensors = data.get("detail_sensors", {})
         self.last_update = data.get("last_update")
+
+        # Presence tracking
+        last_seen_raw = data.get("last_seen")
+        if last_seen_raw:
+            self.last_seen = datetime.fromisoformat(last_seen_raw)
+        self.is_online = data.get("is_online", False)
+        self.offline_reason = data.get("offline_reason")
+        self.tick_delay = data.get("tick_delay")
 
 
 class AccountStore:

@@ -115,10 +115,40 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             "name": spellbook_data.get("name", ""),
         }
 
-    # ── Events (future use, initially empty) ─────────────────────────
-    events = player.get("events", [])
+    # ── Events ─────────────────────────────────────────────────────────
+    # The RuneLite plugin sends events at the root level of the payload
+    # (sibling of "player"), but earlier versions nested them inside
+    # "player".  Check both locations; root-level takes precedence.
+    events = payload.get("events") or player.get("events", [])
     if not isinstance(events, list):
         events = []
+
+    # ── Tick delay (root-level) ──────────────────────────────────────
+    # Number of game ticks between plugin data messages.  Used to
+    # compute a per-account presence timeout (deadman's switch).
+    tick_delay: int | None = None
+    raw_tick = payload.get("tickDelay")
+    if isinstance(raw_tick, (int, float)) and raw_tick > 0:
+        tick_delay = int(raw_tick)
+
+    # ── Game state (root-level) ──────────────────────────────────────
+    # The RuneLite client's current game state (e.g. LOGGED_IN,
+    # LOGIN_SCREEN, CONNECTION_LOST).  Defaults to UNKNOWN.
+    _VALID_GAME_STATES = {
+        "UNKNOWN",
+        "STARTING",
+        "LOGIN_SCREEN",
+        "LOGIN_SCREEN_AUTHENTICATOR",
+        "LOGGING_IN",
+        "LOADING",
+        "LOGGED_IN",
+        "CONNECTION_LOST",
+        "HOPPING",
+    }
+    raw_state = payload.get("state")
+    game_state: str = "UNKNOWN"
+    if isinstance(raw_state, str) and raw_state.upper() in _VALID_GAME_STATES:
+        game_state = raw_state.upper()
 
     return {
         "name": name,
@@ -132,4 +162,6 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "location": location,
         "spellbook": spellbook,
         "events": events,
+        "tickDelay": tick_delay,
+        "state": game_state,
     }

@@ -61,7 +61,8 @@ FULL_PAYLOAD: dict[str, Any] = {
             ]
         },
         "events": [],
-    }
+    },
+    "state": "LOGGED_IN",
 }
 
 
@@ -106,6 +107,10 @@ class TestFullPayload:
     def test_events_empty(self):
         result = parse(FULL_PAYLOAD)
         assert result["events"] == []
+
+    def test_state(self):
+        result = parse(FULL_PAYLOAD)
+        assert result["state"] == "LOGGED_IN"
 
     def test_all_equipment_slots_present(self):
         result = parse(FULL_PAYLOAD)

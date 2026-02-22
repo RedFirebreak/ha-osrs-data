@@ -61,6 +61,7 @@ from custom_components.osrs_data.sensor import (  # noqa: E402
     OsrsInventorySensor,
     OsrsEquipmentSensor,
     OsrsAccountDetailSensor,
+    OsrsGameStateSensor,
 )
 
 
@@ -238,3 +239,50 @@ class TestOsrsAccountDetailSensor:
         sensor = OsrsPlayerInfoSensor(entry, state, "hash1")
         info = sensor.device_info
         assert "Dink" not in str(info)
+
+
+class TestOsrsGameStateSensor:
+    """Tests for the OsrsGameStateSensor entity."""
+
+    def test_default_state_is_unknown(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        sensor = OsrsGameStateSensor(entry, state, "hash1")
+        assert sensor.native_value == "UNKNOWN"
+
+    def test_state_logged_in(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"state": "LOGGED_IN"})
+        sensor = OsrsGameStateSensor(entry, state, "hash1")
+        assert sensor.native_value == "LOGGED_IN"
+
+    def test_state_login_screen(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"state": "LOGIN_SCREEN"})
+        sensor = OsrsGameStateSensor(entry, state, "hash1")
+        assert sensor.native_value == "LOGIN_SCREEN"
+
+    def test_state_updates(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"state": "LOGGED_IN"})
+        sensor = OsrsGameStateSensor(entry, state, "hash1")
+        assert sensor.native_value == "LOGGED_IN"
+        state.update_player_data({"state": "CONNECTION_LOST"})
+        assert sensor.native_value == "CONNECTION_LOST"
+
+    def test_unique_id(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        sensor = OsrsGameStateSensor(entry, state, "hash1")
+        assert sensor.unique_id == "hash1_game_state"
+
+    def test_attributes_contain_last_update(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"state": "LOGGED_IN"})
+        sensor = OsrsGameStateSensor(entry, state, "hash1")
+        attrs = sensor.extra_state_attributes
+        assert "last_update" in attrs

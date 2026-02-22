@@ -270,3 +270,157 @@ class TestEventsParsing:
         result = parse({"player": {"name": "P", "events": "not_a_list"}})
         assert result is not None
         assert result["events"] == []
+
+    def test_root_level_events(self):
+        """Events at the root level (sibling of 'player') are parsed."""
+        result = parse({
+            "player": {"name": "P"},
+            "events": [{"type": "ClientShutdown", "data": "Shutdown"}],
+        })
+        assert result is not None
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "ClientShutdown"
+
+    def test_root_level_events_take_precedence(self):
+        """Root-level events take precedence over player-level events."""
+        result = parse({
+            "player": {
+                "name": "P",
+                "events": [{"type": "LOGIN"}],
+            },
+            "events": [{"type": "LOGOUT"}],
+        })
+        assert result is not None
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "LOGOUT"
+
+    def test_player_level_events_fallback(self):
+        """Player-level events are used when root-level events are absent."""
+        result = parse({
+            "player": {
+                "name": "P",
+                "events": [{"type": "LOGIN"}],
+            },
+        })
+        assert result is not None
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "LOGIN"
+
+    def test_root_level_empty_list_falls_back_to_player(self):
+        """An empty root-level events list falls back to player-level."""
+        result = parse({
+            "player": {
+                "name": "P",
+                "events": [{"type": "LOGIN"}],
+            },
+            "events": [],
+        })
+        assert result is not None
+        # Empty list is falsy, so player-level events are used
+        assert len(result["events"]) == 1
+        assert result["events"][0]["type"] == "LOGIN"
+
+
+# ── tickDelay parsing ───────────────────────────────────────────────
+
+
+class TestTickDelayParsing:
+    def test_tick_delay_present(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": 20})
+        assert result is not None
+        assert result["tickDelay"] == 20
+
+    def test_tick_delay_absent(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+    def test_tick_delay_float_truncated(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": 15.7})
+        assert result is not None
+        assert result["tickDelay"] == 15
+
+    def test_tick_delay_zero_ignored(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": 0})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+    def test_tick_delay_negative_ignored(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": -5})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+    def test_tick_delay_string_ignored(self):
+        result = parse({"player": {"name": "P"}, "tickDelay": "20"})
+        assert result is not None
+        assert result["tickDelay"] is None
+
+
+# ── state parsing ───────────────────────────────────────────────────
+
+
+class TestStateParsing:
+    def test_state_present(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGGED_IN"})
+        assert result is not None
+        assert result["state"] == "LOGGED_IN"
+
+    def test_state_absent_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"
+
+    def test_state_case_insensitive(self):
+        result = parse({"player": {"name": "P"}, "state": "logged_in"})
+        assert result is not None
+        assert result["state"] == "LOGGED_IN"
+
+    def test_state_login_screen(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGIN_SCREEN"})
+        assert result is not None
+        assert result["state"] == "LOGIN_SCREEN"
+
+    def test_state_login_screen_authenticator(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGIN_SCREEN_AUTHENTICATOR"})
+        assert result is not None
+        assert result["state"] == "LOGIN_SCREEN_AUTHENTICATOR"
+
+    def test_state_connection_lost(self):
+        result = parse({"player": {"name": "P"}, "state": "CONNECTION_LOST"})
+        assert result is not None
+        assert result["state"] == "CONNECTION_LOST"
+
+    def test_state_hopping(self):
+        result = parse({"player": {"name": "P"}, "state": "HOPPING"})
+        assert result is not None
+        assert result["state"] == "HOPPING"
+
+    def test_state_starting(self):
+        result = parse({"player": {"name": "P"}, "state": "STARTING"})
+        assert result is not None
+        assert result["state"] == "STARTING"
+
+    def test_state_loading(self):
+        result = parse({"player": {"name": "P"}, "state": "LOADING"})
+        assert result is not None
+        assert result["state"] == "LOADING"
+
+    def test_state_logging_in(self):
+        result = parse({"player": {"name": "P"}, "state": "LOGGING_IN"})
+        assert result is not None
+        assert result["state"] == "LOGGING_IN"
+
+    def test_invalid_state_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}, "state": "INVALID_STATE"})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"
+
+    def test_state_non_string_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}, "state": 123})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"
+
+    def test_state_empty_string_defaults_to_unknown(self):
+        result = parse({"player": {"name": "P"}, "state": ""})
+        assert result is not None
+        assert result["state"] == "UNKNOWN"

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import voluptuous as vol
 
+from datetime import datetime, timedelta, timezone
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -24,6 +26,8 @@ from .const import (
     DATA_PAIRING_STORE,
     DATA_STORE,
     PAIRING_CODE_TTL,
+    PRESENCE_CHECK_INTERVAL,
+    PRESENCE_TIMEOUT,
     SIGNAL_ACCOUNT_UPDATED,
 )
 from .dedupe import DedupeCache
@@ -31,7 +35,7 @@ from .history import HistoryStore
 from .pairing import PairingStore
 from .storage import get_store
 
-PLATFORMS: list[str] = ["sensor"]
+PLATFORMS: list[str] = ["sensor", "binary_sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,6 +156,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("OSRS Data events endpoint at /api/osrs-data/events")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # ── Periodic presence check ─────────────────────────────────────
+    from homeassistant.helpers.event import async_track_time_interval
+
+    def _check_presence(_now: datetime) -> None:
+        """Mark accounts offline if no data received within timeout.
+
+        Uses the per-account dynamic timeout derived from ``tickDelay``
+        when available, otherwise falls back to *PRESENCE_TIMEOUT*.
+        """
+        now = datetime.now(timezone.utc)
+        for acct in account_store.accounts:
+            if acct.is_online and acct.last_seen is not None:
+                elapsed = (now - acct.last_seen).total_seconds()
+                if elapsed > acct.presence_timeout:
+                    acct.is_online = False
+                    acct.offline_reason = "timeout"
+                    _LOGGER.debug(
+                        "Account %s timed out after %.1fs (limit %.1fs)",
+                        acct.player_name,
+                        elapsed,
+                        acct.presence_timeout,
+                    )
+                    async_dispatcher_send(
+                        hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
+                    )
+
+    unsub_presence = async_track_time_interval(
+        hass, _check_presence, timedelta(seconds=PRESENCE_CHECK_INTERVAL)
+    )
+    entry.async_on_unload(unsub_presence)
 
     # Fire dispatcher signals for restored accounts so sensor entities
     # are re-created with their persisted values.

@@ -252,3 +252,233 @@ class TestEventsIntegration:
         assert "accounts" in payload
         assert len(payload["accounts"]) == 1
         assert payload["accounts"][0]["player_name"] == "PlayerOne"
+
+
+# ── ClientShutdown / presence through API tests ─────────────────────
+
+PLAYER_ONE_SHUTDOWN_PAYLOAD: dict[str, Any] = {
+    "player": {
+        "name": "PlayerOne",
+        "accountType": "normal",
+        "world": "302",
+        "stats": {
+            "skills": {
+                "Attack": {"xp": 737627, "level": 60},
+            }
+        },
+        "inventory": {"items": []},
+        "equipment": {"items": []},
+    },
+    "events": [
+        {"type": "ClientShutdown", "data": "Shutdown"},
+    ],
+}
+
+PLAYER_ONE_LOGOUT_PAYLOAD: dict[str, Any] = {
+    "player": {
+        "name": "PlayerOne",
+        "accountType": "normal",
+        "world": "302",
+        "stats": {"skills": {}},
+        "inventory": {"items": []},
+        "equipment": {"items": []},
+    },
+    "events": [
+        {"type": "LOGOUT"},
+    ],
+}
+
+
+class TestClientShutdownIntegration:
+    """End-to-end: ClientShutdown / Logout events through the API mark account offline."""
+
+    @pytest.mark.asyncio
+    async def test_client_shutdown_marks_offline(self):
+        """A ClientShutdown event through the API sets the account offline."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        # First: normal heartbeat → online
+        r1 = await view.post(_make_json_request(hass, PLAYER_ONE_PAYLOAD, token))
+        assert r1.status == 200
+
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is True
+        assert acct.offline_reason == "online"
+
+        # Second: ClientShutdown → offline
+        r2 = await view.post(
+            _make_json_request(hass, PLAYER_ONE_SHUTDOWN_PAYLOAD, token)
+        )
+        assert r2.status == 200
+
+        assert acct.is_online is False
+        assert acct.offline_reason == "Shutdown"
+
+    @pytest.mark.asyncio
+    async def test_logout_event_marks_offline(self):
+        """A LOGOUT event through the API sets the account offline."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        await view.post(_make_json_request(hass, PLAYER_ONE_PAYLOAD, token))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is True
+
+        await view.post(_make_json_request(hass, PLAYER_ONE_LOGOUT_PAYLOAD, token))
+        assert acct.is_online is False
+        assert acct.offline_reason == "logout"
+
+    @pytest.mark.asyncio
+    async def test_normal_heartbeat_after_shutdown_goes_online(self):
+        """A normal heartbeat after shutdown brings the account back online."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        await view.post(_make_json_request(hass, PLAYER_ONE_PAYLOAD, token))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is True
+
+        await view.post(
+            _make_json_request(hass, PLAYER_ONE_SHUTDOWN_PAYLOAD, token)
+        )
+        assert acct.is_online is False
+
+        # Use an updated payload (different world) to avoid dedupe with the
+        # first heartbeat — mirrors real reconnection where data changes.
+        reconnect_payload: dict[str, Any] = {
+            "player": {
+                "name": "PlayerOne",
+                "accountType": "normal",
+                "world": "400",
+                "stats": {"skills": {}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+                "events": [],
+            }
+        }
+        await view.post(_make_json_request(hass, reconnect_payload, token))
+        assert acct.is_online is True
+        assert acct.offline_reason == "online"
+
+    @pytest.mark.asyncio
+    async def test_shutdown_persists_in_saved_data(self):
+        """Offline state from shutdown is reflected in persisted account data."""
+        hass, store, token, mock_storage = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        await view.post(
+            _make_json_request(hass, PLAYER_ONE_SHUTDOWN_PAYLOAD, token)
+        )
+
+        save_callback = mock_storage.async_delay_save.call_args[0][0]
+        payload = save_callback()
+        acct_data = payload["accounts"][0]
+        assert acct_data["is_online"] is False
+        assert acct_data["offline_reason"] == "Shutdown"
+
+    @pytest.mark.asyncio
+    async def test_shutdown_only_payload_marks_offline(self):
+        """ClientShutdown as the very first (and only) event marks account offline."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        r = await view.post(
+            _make_json_request(hass, PLAYER_ONE_SHUTDOWN_PAYLOAD, token)
+        )
+        assert r.status == 200
+
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is False
+        assert acct.offline_reason == "Shutdown"
+
+    @pytest.mark.asyncio
+    async def test_realistic_runelite_shutdown_payload(self):
+        """Full realistic RuneLite payload with root-level ClientShutdown."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        # First: normal heartbeat
+        normal_payload: dict[str, Any] = {
+            "player": {
+                "name": "TestPlayer",
+                "accountType": "0",
+                "world": "395",
+                "stats": {"skills": {"Attack": {"xp": 6124520, "level": 91}}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "events": [],
+            "state": "LOGGED_IN",
+        }
+        await view.post(_make_json_request(hass, normal_payload, token))
+        acct = store.get_or_create(None, "TestPlayer")
+        assert acct.is_online is True
+
+        # Second: ClientShutdown at root level (real RuneLite format)
+        shutdown_payload: dict[str, Any] = {
+            "player": {
+                "name": "TestPlayer",
+                "accountType": "0",
+                "world": "395",
+                "stats": {"skills": {"Attack": {"xp": 6124520, "level": 91}}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "events": [
+                {"type": "ClientShutdown", "data": "Shutdown"},
+            ],
+            "state": "LOGGED_IN",
+        }
+        await view.post(_make_json_request(hass, shutdown_payload, token))
+        assert acct.is_online is False
+        assert acct.offline_reason == "Shutdown"
+
+    @pytest.mark.asyncio
+    async def test_tick_delay_stored_through_api(self):
+        """tickDelay from RuneLite payload is stored on the account."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "PlayerOne",
+                "accountType": "normal",
+                "world": "302",
+                "stats": {"skills": {}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "events": [],
+            "tickDelay": 20,
+            "state": "LOGGED_IN",
+        }
+        r = await view.post(_make_json_request(hass, payload, token))
+        assert r.status == 200
+
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.tick_delay == 20
+        assert acct.presence_timeout == 37
+
+    @pytest.mark.asyncio
+    async def test_tick_delay_persisted_in_save(self):
+        """tickDelay is included in the save payload."""
+        hass, store, token, mock_storage = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        payload: dict[str, Any] = {
+            "player": {
+                "name": "PlayerOne",
+                "accountType": "normal",
+                "world": "302",
+                "stats": {"skills": {}},
+                "inventory": {"items": []},
+                "equipment": {"items": []},
+            },
+            "tickDelay": 20,
+        }
+        await view.post(_make_json_request(hass, payload, token))
+
+        save_callback = mock_storage.async_delay_save.call_args[0][0]
+        saved = save_callback()
+        assert saved["accounts"][0]["tick_delay"] == 20

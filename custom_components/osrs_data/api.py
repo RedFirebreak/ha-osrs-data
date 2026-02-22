@@ -62,6 +62,7 @@ def _build_normalized_event(parsed: dict[str, Any]) -> dict[str, Any]:
         "player_name": parsed.get("name"),
         "account_type": parsed.get("accountType"),
         "world": parsed.get("world"),
+        "state": parsed.get("state", "UNKNOWN"),
         "received_at": datetime.now(timezone.utc).isoformat(),
         "events": parsed.get("events", []),
     }
