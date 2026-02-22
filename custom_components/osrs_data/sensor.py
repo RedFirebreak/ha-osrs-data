@@ -37,6 +37,7 @@ async def async_setup_entry(
 
     known_accounts: set[str] = set()
     known_detail_keys: dict[str, set[str]] = {}
+    known_event_total_keys: dict[str, set[str]] = {}
 
     @callback
     def _handle_account_update(account_hash: str) -> None:
@@ -52,6 +53,7 @@ async def async_setup_entry(
         if account_hash not in known_accounts:
             known_accounts.add(account_hash)
             known_detail_keys[account_hash] = set()
+            known_event_total_keys[account_hash] = set()
 
             new_entities.append(OsrsPlayerInfoSensor(entry, state, slug))
             new_entities.append(OsrsInventorySensor(entry, state, slug))
@@ -68,6 +70,14 @@ async def async_setup_entry(
                 known_detail_keys[account_hash].add(key)
                 new_entities.append(
                     OsrsAccountDetailSensor(entry, state, slug, key)
+                )
+
+        # Create event total sensors for any new event types
+        for ev_key in state.event_totals:
+            if ev_key not in known_event_total_keys[account_hash]:
+                known_event_total_keys[account_hash].add(ev_key)
+                new_entities.append(
+                    OsrsEventTotalSensor(entry, state, slug, ev_key)
                 )
 
         if new_entities:
@@ -581,6 +591,63 @@ class OsrsAccountDetailSensor(SensorEntity):
             attrs.update(detail["attributes"])
         if detail.get("last_update"):
             attrs["last_update"] = detail["last_update"]
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Event total sensors ─────────────────────────────────────────────
+
+
+class OsrsEventTotalSensor(SensorEntity):
+    """Sensor that tracks the total count of a specific event type per account."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+        event_type: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._event_type = event_type
+        event_slug = _slugify_detail_key(event_type)
+        self._attr_unique_id = f"{state.account_hash}_event_{event_slug}_total"
+        self._attr_name = f"{event_type} Total"
+
+    @property
+    def native_value(self) -> int:
+        """Total number of events received."""
+        entry = self._state.event_totals.get(self._event_type)
+        if entry is None:
+            return 0
+        return entry.get("count", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        entry = self._state.event_totals.get(self._event_type)
+        if entry is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        if entry.get("last_fired"):
+            attrs["last_fired"] = entry["last_fired"]
         return attrs
 
     @property

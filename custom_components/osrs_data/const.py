@@ -14,6 +14,7 @@ DATA_HISTORY_STORE = "history_store"
 DATA_DEDUPE_CACHE = "dedupe_cache"
 DATA_STORE = "store"
 DATA_PAIRING_STORE = "pairing_store"
+DATA_EVENT_DEDUPE_CACHE = "event_dedupe_cache"
 
 # Dispatcher signal for account updates
 SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"

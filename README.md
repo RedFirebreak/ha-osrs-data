@@ -118,13 +118,205 @@ Account state, paired devices, and history are persisted to disk via Home Assist
 
 ### Event deduplication
 
-If the RuneLite plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a 30-second window. Distinct data updates always pass through.
+If the RuneLite plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a 30-second window. Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `event_id` field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
+
+### Event types
+
+The RuneLite plugin sends events in the `events[]` array of each payload. The integration fires an individual `osrs_data_event` on the HA event bus for each event, with flat fields for easy automation matching.
+
+| Event type (raw) | Normalized `event_type` | Description |
+|---|---|---|
+| `clientShutdown` | `CLIENTSHUTDOWN` | Client/logout — marks account offline |
+| `death` | `DEATH` | Player death with kept/lost items and killer info |
+| `levelUp` | `LEVELUP` | In-game level up for one or more skills |
+| `loot` | `LOOT` | NPC or other loot drop |
+| `pkLoot` | `PKLOOT` | PvP loot (player kill) |
+
+Each event type also creates a counter sensor (e.g. `sensor.<account>_death_total`) that tracks the total number of events received and exposes a `last_fired` attribute.
+
+#### clientShutdown (Logout)
+
+Fired when the RuneLite client shuts down or the player logs out. Marks the account as offline.
+
+```json
+{
+  "events": [
+    {
+      "type": "clientShutdown",
+      "data": "Logout"
+    }
+  ]
+}
+```
+
+#### death
+
+Fired when the player dies. Contains kept/lost items, killer info, value lost, and death location.
+
+```json
+{
+  "events": [
+    {
+      "type": "death",
+      "data": {
+        "valueLost": 88,
+        "danger": "DANGEROUS",
+        "killerName": "Guard",
+        "killerNpcId": 11917,
+        "keptItems": [
+          {
+            "name": "Amulet of fury",
+            "id": 6585,
+            "gePrice": 2391076,
+            "haPrice": 121200,
+            "quantity": 1
+          }
+        ],
+        "lostItems": [
+          {
+            "name": "Bucket",
+            "id": 1925,
+            "gePrice": 5,
+            "haPrice": 1,
+            "quantity": 10
+          },
+          {
+            "name": "Coins",
+            "id": 995,
+            "gePrice": 1,
+            "haPrice": 0,
+            "quantity": 30
+          }
+        ],
+        "location": {
+          "x": 3175,
+          "y": 3433,
+          "plane": 0
+        }
+      }
+    }
+  ]
+}
+```
+
+#### levelUp
+
+Fired when the player levels up one or more skills in-game. The `data` field is a list because multiple level-ups can be sent at once.
+
+```json
+{
+  "events": [
+    {
+      "type": "levelUp",
+      "data": [
+        {
+          "skill": "sailing",
+          "level": 75
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### loot
+
+Fired when loot is received from an NPC kill or other source.
+
+```json
+{
+  "events": [
+    {
+      "type": "loot",
+      "data": {
+        "items": [
+          {
+            "name": "Bones",
+            "id": 526,
+            "gePrice": 34,
+            "haPrice": 0,
+            "quantity": 1
+          },
+          {
+            "name": "Coins",
+            "id": 995,
+            "gePrice": 1,
+            "haPrice": 0,
+            "quantity": 1
+          }
+        ],
+        "highestValueItem": {
+          "name": "Bones",
+          "id": 526,
+          "gePrice": 34,
+          "haPrice": 0,
+          "quantity": 1
+        },
+        "totalValue": 35,
+        "source": {
+          "text": "Guard",
+          "link": "https://oldschool.runescape.wiki/w/Special:Search?search=Guard"
+        },
+        "type": "NPC",
+        "npcId": 11916,
+        "criteria": []
+      }
+    }
+  ]
+}
+```
+
+#### pkLoot
+
+Fired when loot is received from a player kill. Same structure as `loot` but with `"type": "PLAYER"`.
+
+```json
+{
+  "events": [
+    {
+      "type": "pkLoot",
+      "data": {
+        "items": [
+          {
+            "name": "Bones",
+            "id": 526,
+            "gePrice": 34,
+            "haPrice": 0,
+            "quantity": 1
+          },
+          {
+            "name": "Coins",
+            "id": 995,
+            "gePrice": 1,
+            "haPrice": 0,
+            "quantity": 1
+          }
+        ],
+        "highestValueItem": {
+          "name": "Bones",
+          "id": 526,
+          "gePrice": 34,
+          "haPrice": 0,
+          "quantity": 1
+        },
+        "totalValue": 35,
+        "source": {
+          "text": "PlayerName",
+          "link": ""
+        },
+        "type": "PLAYER",
+        "criteria": []
+      }
+    }
+  ]
+}
+```
 
 ## Automations
 
-The integration fires an `osrs_data_event` on the Home Assistant event bus each time data is received. Use an **Event trigger** to build automations.
+The integration fires `osrs_data_event` on the Home Assistant event bus. There are two kinds of events:
 
-The event payload looks like:
+**Base event** — fired every time data is received (roughly every 25 seconds):
 
 ```json
 {
@@ -133,6 +325,17 @@ The event payload looks like:
   "world": "302",
   "received_at": "2025-01-15T12:34:56+00:00",
   "events": []
+}
+```
+
+**Per-event** — fired once for each entry in the `events[]` array, with flat fields for easy automation matching:
+
+```json
+{
+  "account_name": "YourRSN",
+  "event_type": "DEATH",
+  "event_data": { "killerName": "Guard", "valueLost": 88 },
+  "received_at": "2025-01-15T12:34:56+00:00"
 }
 ```
 
@@ -172,7 +375,51 @@ automation:
             {{ state_attr('sensor.osrs_playerone_health', 'max') }} HP
 ```
 
-### Example: flash lights on event
+### Example: flash lights on death
+
+```yaml
+automation:
+  - alias: "OSRS - Blink lights on death"
+    trigger:
+      - platform: event
+        event_type: osrs_data_event
+        event_data:
+          account_name: osrsuser
+          event_type: DEATH
+    action:
+      - service: light.turn_on
+        target:
+          entity_id: light.desk_lamp
+        data:
+          color_name: red
+          flash: short
+```
+
+### Example: notify on specific loot
+
+```yaml
+automation:
+  - alias: "OSRS - Notify on valuable loot"
+    trigger:
+      - platform: event
+        event_type: osrs_data_event
+        event_data:
+          event_type: LOOT
+    condition:
+      - condition: template
+        value_template: >
+          {{ trigger.event.data.event_data.totalValue | default(0) > 10000 }}
+    action:
+      - service: notify.mobile_app_my_phone
+        data:
+          title: "💰 Valuable loot!"
+          message: >
+            {{ trigger.event.data.account_name }} looted
+            {{ trigger.event.data.event_data.totalValue }} gp worth of items
+            from {{ trigger.event.data.event_data.source.text }}
+```
+
+### Example: flash lights on any event
 
 ```yaml
 automation:
