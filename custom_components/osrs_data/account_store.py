@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
+
+# Import tick constants for timeout calculation
+from .const import PRESENCE_TIMEOUT, TICK_DURATION, TICK_TIMEOUT_MULTIPLIER
 
 
 def _normalize_player_name(name: str) -> str:
@@ -13,131 +20,217 @@ def _normalize_player_name(name: str) -> str:
 
 
 class AccountState:
-    """Per-account event details and detail sensors."""
-
-    # Event types that get their own "Last <Type>" sensor
-    TYPED_EVENT_TYPES: tuple[str, ...] = (
-        "LOOT",
-        "DEATH",
-        "PET",
-        "QUEST",
-        "COMBAT_ACHIEVEMENT",
-        "ACHIEVEMENT_DIARY",
-        "COLLECTION",
-    )
+    """Per-account player state and detail sensors."""
 
     def __init__(self, account_hash: str, player_name: str) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
+        self.account_type: str | None = None
+        self.world: str | None = None
 
-        # Last event (any type)
-        self.last_event_type: str | None = None
-        self.last_event_summary: str | None = None
-        self.last_event_data: dict[str, Any] = {}
-        self.last_update: str | None = None
+        # Skills: {skill_name: {"xp": ..., "level": ...}}
+        self.skills: dict[str, dict[str, Any]] = {}
 
-        # Per-type last event: type → {summary, data, last_update}
-        self.last_typed_events: dict[str, dict[str, Any]] = {}
+        # Inventory: list of item dicts (max 28 slots)
+        self.inventory: list[dict[str, Any]] = []
+
+        # Equipment: {slot: item_dict or {}}
+        self.equipment: dict[str, dict[str, Any]] = {}
+
+        # Health: {current: int, max: int}
+        self.health: dict[str, int] = {"current": 0, "max": 0}
+
+        # Prayer Points: {current: int, max: int}
+        self.prayer_points: dict[str, int] = {"current": 0, "max": 0}
+
+        # Location: {x: int, y: int, plane: int}
+        self.location: dict[str, int] = {"x": 0, "y": 0, "plane": 0}
+
+        # Spellbook: {id: int, name: str}
+        self.spellbook: dict[str, Any] = {"id": 0, "name": ""}
+
+        # Events: list (future use, initially empty)
+        self.events: list[Any] = []
+
+        # Game state: current RuneLite client state (e.g. LOGGED_IN)
+        self.game_state: str = "UNKNOWN"
 
         # Detail sensors: key → {value, attributes, last_update}
-        # Only LEVEL events produce detail sensors (per-skill + combat level)
         self.detail_sensors: dict[str, dict[str, Any]] = {}
 
-    def _update_detail_sensors(
-        self, event_type: str, data: dict[str, Any]
-    ) -> None:
-        """Extract detail sensor entries from parsed event data.
+        self.last_update: str | None = None
 
-        Only LEVEL events produce detail sensors (individual skills and
-        combat level).  All other event types use per-type last-event
-        sensors instead.
-        """
-        if event_type != "LEVEL":
-            return
+        # Presence tracking
+        self.last_seen: datetime | None = None
+        self.is_online: bool = False
+        self.offline_reason: str | None = None
 
-        now = datetime.now(timezone.utc).isoformat()
+        # Tick-based dynamic timeout (set from tickDelay in payload)
+        self.tick_delay: int | None = None
 
-        # Update all skills from the allSkills snapshot (full refresh)
-        for skill, level in data.get("allSkills", {}).items():
-            self.detail_sensors[skill] = {
-                "value": level,
-                "attributes": {"skill": skill},
-                "last_update": now,
-            }
+        # Event totals: {event_type: {"count": int, "last_fired": iso_str}}
+        self.event_totals: dict[str, dict[str, Any]] = {}
 
-        # Overlay levelled skills (may have the same values, but ensures
-        # freshly-levelled skills are always present even without allSkills)
-        for skill, level in data.get("levelledSkills", {}).items():
-            self.detail_sensors[skill] = {
-                "value": level,
-                "attributes": {"skill": skill},
-                "last_update": now,
-            }
-
-        # Store combat level
-        if "combatLevel" in data:
-            self.detail_sensors["Combat Level"] = {
-                "value": data["combatLevel"],
-                "attributes": {
-                    "increased": data.get("combatLevelIncreased", False),
-                },
-                "last_update": now,
-            }
-
-    def record_event(
+    def update_player_data(
         self,
-        event_type: str,
-        summary: str,
-        data: dict[str, Any],
+        parsed: dict[str, Any],
         player_name: str | None = None,
     ) -> None:
-        """Record a parsed event and update detail sensors."""
+        """Update from parsed base JSON player data."""
         if player_name:
             self.player_name = player_name
 
         now = datetime.now(timezone.utc).isoformat()
-
-        self.last_event_type = event_type
-        self.last_event_summary = summary
-        self.last_event_data = data
         self.last_update = now
+        self.last_seen = datetime.now(timezone.utc)
 
-        # Update per-type last event
-        if event_type in self.TYPED_EVENT_TYPES:
-            self.last_typed_events[event_type] = {
-                "summary": summary,
-                "data": data,
-                "last_update": now,
-            }
+        self.account_type = parsed.get("accountType", self.account_type)
+        self.world = parsed.get("world", self.world)
+        self.events = parsed.get("events", [])
 
-        self._update_detail_sensors(event_type, data)
+        # Update tick delay if provided in this payload
+        new_tick_delay = parsed.get("tickDelay")
+        if new_tick_delay is not None:
+            self.tick_delay = new_tick_delay
+
+        # Update game state
+        self.game_state = parsed.get("state", "UNKNOWN")
+
+        self.inventory = parsed.get("inventory", [])
+        self.equipment = parsed.get("equipment", {})
+        self.health = parsed.get("health", {"current": 0, "max": 0})
+        self.prayer_points = parsed.get("prayerPoints", {"current": 0, "max": 0})
+        self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
+        self.spellbook = parsed.get("spellbook", {"id": 0, "name": ""})
+
+        # Determine presence: default to online (heartbeat), then let
+        # events override.  This block runs BEFORE skill processing so
+        # an exception in skill parsing can never prevent a shutdown /
+        # logout event from being honoured.
+        self.is_online = True
+        self.offline_reason = "online"
+
+        for event in self.events:
+            if isinstance(event, dict):
+                etype = event.get("type", "")
+                etype_upper = etype.upper()
+                if etype_upper == "LOGOUT":
+                    self.is_online = False
+                    self.offline_reason = "logout"
+                    _LOGGER.debug(
+                        "Account %s marked offline (logout event)",
+                        self.player_name,
+                    )
+                elif etype_upper == "CLIENTSHUTDOWN":
+                    self.is_online = False
+                    self.offline_reason = event.get("data", "shutdown")
+                    _LOGGER.debug(
+                        "Account %s marked offline (ClientShutdown: %s)",
+                        self.player_name,
+                        self.offline_reason,
+                    )
+                elif etype_upper == "LOGIN":
+                    self.is_online = True
+                    self.offline_reason = "online"
+
+        # Update skills and detail sensors
+        new_skills = parsed.get("skills", {})
+        for skill_name, skill_data in new_skills.items():
+            new_xp = skill_data.get("xp", 0)
+            new_level = skill_data.get("level", 1)
+            old = self.skills.get(skill_name, {})
+
+            if (
+                old.get("xp") != new_xp
+                or old.get("level") != new_level
+                or skill_name not in self.skills
+            ):
+                self.detail_sensors[skill_name] = {
+                    "value": new_level,
+                    "attributes": {"xp": new_xp},
+                    "last_update": now,
+                }
+
+            self.skills[skill_name] = {"xp": new_xp, "level": new_level}
+
+    def record_event(self, event_type: str) -> None:
+        """Increment the counter for *event_type* and update last_fired."""
+        now = datetime.now(timezone.utc).isoformat()
+        entry = self.event_totals.get(event_type)
+        if entry is None:
+            self.event_totals[event_type] = {"count": 1, "last_fired": now}
+        else:
+            entry["count"] = entry.get("count", 0) + 1
+            entry["last_fired"] = now
+
+    @property
+    def presence_timeout(self) -> float:
+        """Compute the presence timeout in seconds.
+
+        When ``tick_delay`` is known, returns
+        ``floor(tick_delay * 1.5 * 0.6)``.
+        Otherwise falls back to the global ``PRESENCE_TIMEOUT`` (25 min).
+        """
+        if self.tick_delay is not None and self.tick_delay > 0:
+            return math.floor(
+                self.tick_delay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION
+            )
+        return PRESENCE_TIMEOUT
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
         return {
             "account_hash": self.account_hash,
             "player_name": self.player_name,
-            "last_event_type": self.last_event_type,
-            "last_event_summary": self.last_event_summary,
-            "last_event_data": self.last_event_data,
-            "last_update": self.last_update,
-            "last_typed_events": self.last_typed_events,
+            "account_type": self.account_type,
+            "world": self.world,
+            "skills": self.skills,
+            "inventory": self.inventory,
+            "equipment": self.equipment,
+            "health": self.health,
+            "prayerPoints": self.prayer_points,
+            "location": self.location,
+            "spellbook": self.spellbook,
+            "events": self.events,
+            "game_state": self.game_state,
             "detail_sensors": self.detail_sensors,
+            "last_update": self.last_update,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "is_online": self.is_online,
+            "offline_reason": self.offline_reason,
+            "tick_delay": self.tick_delay,
+            "event_totals": self.event_totals,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
         """Restore the account state from a persisted dict."""
         self.player_name = data.get("player_name", self.player_name)
-        self.last_event_type = data.get("last_event_type")
-        self.last_event_summary = data.get("last_event_summary")
-        self.last_event_data = data.get("last_event_data", {})
-        self.last_update = data.get("last_update")
-        self.last_typed_events = data.get("last_typed_events", {})
+        self.account_type = data.get("account_type")
+        self.world = data.get("world")
+        self.skills = data.get("skills", {})
+        self.inventory = data.get("inventory", [])
+        self.equipment = data.get("equipment", {})
+        self.health = data.get("health", {"current": 0, "max": 0})
+        self.prayer_points = data.get("prayerPoints", {"current": 0, "max": 0})
+        self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
+        self.spellbook = data.get("spellbook", {"id": 0, "name": ""})
+        self.events = data.get("events", [])
+        self.game_state = data.get("game_state", "UNKNOWN")
         self.detail_sensors = data.get("detail_sensors", {})
+        self.last_update = data.get("last_update")
+
+        # Presence tracking
+        last_seen_raw = data.get("last_seen")
+        if last_seen_raw:
+            self.last_seen = datetime.fromisoformat(last_seen_raw)
+        self.is_online = data.get("is_online", False)
+        self.offline_reason = data.get("offline_reason")
+        self.tick_delay = data.get("tick_delay")
+        self.event_totals = data.get("event_totals", {})
 
 
 class AccountStore:
-    """In-memory store keyed by dinkAccountHash (fallback: playerName)."""
+    """In-memory store keyed by account identifier (fallback: playerName)."""
 
     def __init__(self) -> None:
         self._by_hash: dict[str, AccountState] = {}

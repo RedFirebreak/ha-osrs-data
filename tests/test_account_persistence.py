@@ -13,7 +13,7 @@ for mod_name in (
     "homeassistant.config_entries",
     "homeassistant.components",
     "homeassistant.components.sensor",
-    "homeassistant.components.webhook",
+    "homeassistant.components.http",
     "homeassistant.helpers",
     "homeassistant.helpers.dispatcher",
     "homeassistant.helpers.entity_platform",
@@ -42,21 +42,29 @@ class TestAccountStatePersistence:
 
         assert restored.account_hash == "hash1"
         assert restored.player_name == "PlayerOne"
-        assert restored.last_event_type is None
-        assert restored.last_event_summary is None
-        assert restored.last_event_data == {}
+        assert restored.account_type is None
+        assert restored.world is None
+        assert restored.skills == {}
+        assert restored.inventory == []
+        assert restored.equipment == {}
+        assert restored.events == []
+        assert restored.game_state == "UNKNOWN"
         assert restored.last_update is None
-        assert restored.last_typed_events == {}
         assert restored.detail_sensors == {}
 
-    def test_roundtrip_level_event(self):
-        """A LEVEL event with skill detail sensors roundtrips correctly."""
+    def test_roundtrip_player_data(self):
+        """Player data with skill sensors roundtrips correctly."""
         state = AccountState("hash1", "RedFuhrbreak")
-        state.record_event("LEVEL", "Levelled Sailing to 70", {
-            "levelledSkills": {"Sailing": 70},
-            "allSkills": {"Attack": 99, "Sailing": 70},
-            "combatLevel": 126,
-            "combatLevelIncreased": False,
+        state.update_player_data({
+            "accountType": "normal",
+            "world": "302",
+            "skills": {
+                "Sailing": {"xp": 50000, "level": 70},
+                "Attack": {"xp": 13000000, "level": 99},
+            },
+            "inventory": [{"name": "Shark", "quantity": 10}],
+            "equipment": {"HEAD": {"name": "Helm"}},
+            "events": [],
         })
 
         data = state.to_dict()
@@ -64,45 +72,43 @@ class TestAccountStatePersistence:
         restored.load_dict(data)
 
         assert restored.player_name == "RedFuhrbreak"
-        assert restored.last_event_type == "LEVEL"
-        assert restored.last_event_summary == "Levelled Sailing to 70"
+        assert restored.account_type == "normal"
+        assert restored.world == "302"
         assert restored.last_update is not None
         assert "Sailing" in restored.detail_sensors
         assert restored.detail_sensors["Sailing"]["value"] == 70
+        assert restored.detail_sensors["Sailing"]["attributes"]["xp"] == 50000
         assert "Attack" in restored.detail_sensors
         assert restored.detail_sensors["Attack"]["value"] == 99
-        assert "Combat Level" in restored.detail_sensors
-        assert restored.detail_sensors["Combat Level"]["value"] == 126
+        assert restored.detail_sensors["Attack"]["attributes"]["xp"] == 13000000
+        assert len(restored.inventory) == 1
+        assert restored.equipment["HEAD"]["name"] == "Helm"
 
-    def test_roundtrip_typed_event(self):
-        """A typed event (DEATH) roundtrips correctly."""
+    def test_roundtrip_skills_preserved(self):
+        """Skills dict persists correctly."""
         state = AccountState("hash1", "Player")
-        state.record_event("DEATH", "Died to Jad", {"valueLost": 5000, "isPvp": False})
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+        })
 
         data = state.to_dict()
         restored = AccountState("hash1", "placeholder")
         restored.load_dict(data)
 
-        assert restored.last_event_type == "DEATH"
-        assert "DEATH" in restored.last_typed_events
-        assert restored.last_typed_events["DEATH"]["summary"] == "Died to Jad"
-        assert restored.last_typed_events["DEATH"]["data"]["valueLost"] == 5000
+        assert restored.skills == {"Attack": {"xp": 1000, "level": 10}}
 
-    def test_roundtrip_multiple_typed_events(self):
-        """Multiple typed events all persist correctly."""
+    def test_roundtrip_game_state(self):
+        """Game state persists correctly through a roundtrip."""
         state = AccountState("hash1", "Player")
-        state.record_event("DEATH", "Died", {"valueLost": 100})
-        state.record_event("LOOT", "Got loot", {"source": "Goblin"})
-        state.record_event("QUEST", "Completed quest", {"questName": "Dragon Slayer I"})
+        state.update_player_data({"state": "LOGGED_IN"})
 
         data = state.to_dict()
+        assert data["game_state"] == "LOGGED_IN"
+
         restored = AccountState("hash1", "placeholder")
         restored.load_dict(data)
 
-        assert restored.last_event_type == "QUEST"
-        assert "DEATH" in restored.last_typed_events
-        assert "LOOT" in restored.last_typed_events
-        assert "QUEST" in restored.last_typed_events
+        assert restored.game_state == "LOGGED_IN"
 
 
 class TestAccountStorePersistence:
@@ -117,11 +123,12 @@ class TestAccountStorePersistence:
         assert len(store2.accounts) == 0
 
     def test_roundtrip_single_account(self):
-        """A single account with events roundtrips correctly."""
+        """A single account with data roundtrips correctly."""
         store = AccountStore()
-        acct = store.get_or_create("hashAAA", "PlayerOne")
-        acct.record_event("LEVEL", "Levelled Attack to 70", {
-            "levelledSkills": {"Attack": 70},
+        acct = store.get_or_create(None, "PlayerOne")
+        acct.update_player_data({
+            "accountType": "normal",
+            "skills": {"Attack": {"xp": 1000, "level": 70}},
         })
 
         data = store.to_dict()
@@ -130,20 +137,21 @@ class TestAccountStorePersistence:
         store2.load_dict(data)
 
         assert len(store2.accounts) == 1
-        restored = store2.get_by_hash("hashAAA")
+        restored = store2.get_or_create(None, "PlayerOne")
         assert restored is not None
         assert restored.player_name == "PlayerOne"
-        assert restored.last_event_type == "LEVEL"
+        assert restored.account_type == "normal"
         assert "Attack" in restored.detail_sensors
         assert restored.detail_sensors["Attack"]["value"] == 70
+        assert restored.detail_sensors["Attack"]["attributes"]["xp"] == 1000
 
     def test_roundtrip_multiple_accounts(self):
         """Multiple accounts roundtrip correctly with separate state."""
         store = AccountStore()
-        a = store.get_or_create("hashA", "PlayerA")
-        a.record_event("LEVEL", "Levelled Attack to 70", {"levelledSkills": {"Attack": 70}})
-        b = store.get_or_create("hashB", "PlayerB")
-        b.record_event("DEATH", "Died", {"valueLost": 500})
+        a = store.get_or_create(None, "PlayerA")
+        a.update_player_data({"skills": {"Attack": {"xp": 1000, "level": 70}}})
+        b = store.get_or_create(None, "PlayerB")
+        b.update_player_data({"skills": {"Defence": {"xp": 500, "level": 50}}})
 
         data = store.to_dict()
 
@@ -151,12 +159,6 @@ class TestAccountStorePersistence:
         store2.load_dict(data)
 
         assert len(store2.accounts) == 2
-        ra = store2.get_by_hash("hashA")
-        rb = store2.get_by_hash("hashB")
-        assert ra is not None
-        assert rb is not None
-        assert ra.last_event_type == "LEVEL"
-        assert rb.last_event_type == "DEATH"
 
     def test_load_empty_list_is_noop(self):
         """Loading an empty list does not create any accounts."""
@@ -165,11 +167,11 @@ class TestAccountStorePersistence:
         assert len(store.accounts) == 0
 
     def test_sensor_value_survives_roundtrip(self):
-        """The exact scenario from the bug: skill level persists after roundtrip."""
+        """Skill data persists after roundtrip."""
         store = AccountStore()
-        acct = store.get_or_create("hashRedFuhrbreak", "RedFuhrbreak")
-        acct.record_event("LEVEL", "Levelled Sailing to 70", {
-            "levelledSkills": {"Sailing": 70},
+        acct = store.get_or_create(None, "RedFuhrbreak")
+        acct.update_player_data({
+            "skills": {"Sailing": {"xp": 50000, "level": 70}},
         })
 
         # Simulate save
@@ -179,7 +181,7 @@ class TestAccountStorePersistence:
         store2 = AccountStore()
         store2.load_dict(data)
 
-        restored = store2.get_by_hash("hashRedFuhrbreak")
+        restored = store2.get_or_create(None, "RedFuhrbreak")
         assert restored is not None
         assert restored.detail_sensors["Sailing"]["value"] == 70
-        assert restored.last_event_summary == "Levelled Sailing to 70"
+        assert restored.detail_sensors["Sailing"]["attributes"]["xp"] == 50000

@@ -13,7 +13,7 @@ for mod_name in (
     "homeassistant.config_entries",
     "homeassistant.components",
     "homeassistant.components.sensor",
-    "homeassistant.components.webhook",
+    "homeassistant.components.http",
     "homeassistant.helpers",
     "homeassistant.helpers.dispatcher",
     "homeassistant.helpers.entity_platform",
@@ -34,32 +34,74 @@ from custom_components.osrs_data.account_store import (  # noqa: E402
 class TestAccountState:
     def test_initial_state(self):
         state = AccountState("hash1", "PlayerOne")
-        assert state.last_event_type is None
+        assert state.account_type is None
+        assert state.world is None
+        assert state.skills == {}
+        assert state.inventory == []
+        assert state.equipment == {}
+        assert state.events == []
         assert state.detail_sensors == {}
 
-    def test_record_level_event(self):
+    def test_update_player_data(self):
         state = AccountState("hash1", "PlayerOne")
-        state.record_event("LEVEL", "Levelled Attack to 70", {"levelledSkills": {"Attack": 70}})
-        assert state.last_event_type == "LEVEL"
-        assert state.last_event_summary == "Levelled Attack to 70"
+        state.update_player_data({
+            "accountType": "normal",
+            "world": "302",
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+            "inventory": [{"name": "Shark", "quantity": 5}],
+            "equipment": {"HEAD": {"name": "Helm"}},
+            "events": [],
+        })
+        assert state.account_type == "normal"
+        assert state.world == "302"
+        assert state.skills == {"Attack": {"xp": 1000, "level": 10}}
+        assert len(state.inventory) == 1
+        assert state.equipment["HEAD"]["name"] == "Helm"
         assert state.last_update is not None
 
-    def test_record_multiple_events(self):
-        state = AccountState("hash1", "Player")
-        state.record_event("LEVEL", "a", {})
-        state.record_event("LEVEL", "b", {})
-        state.record_event("DEATH", "died", {"valueLost": 100})
-        assert state.last_event_type == "DEATH"
+    def test_update_creates_skill_sensors(self):
+        state = AccountState("hash1", "PlayerOne")
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+        })
+        assert "Attack" in state.detail_sensors
+        assert state.detail_sensors["Attack"]["value"] == 10
+        assert state.detail_sensors["Attack"]["attributes"]["xp"] == 1000
 
-    def test_unsupported_type_still_tracked(self):
-        state = AccountState("hash1", "Player")
-        state.record_event("LOGIN", "logged in", {})
-        assert state.last_event_type == "LOGIN"
-
-    def test_record_updates_player_name(self):
+    def test_update_player_name(self):
         state = AccountState("hash1", "OldName")
-        state.record_event("LEVEL", "test", {}, player_name="NewName")
+        state.update_player_data({}, player_name="NewName")
         assert state.player_name == "NewName"
+
+    def test_skill_sensor_only_on_change(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+        })
+        first_update = state.detail_sensors["Attack"]["last_update"]
+
+        # Same values — sensor should not be refreshed
+        import time
+        time.sleep(0.01)
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+        })
+        assert state.detail_sensors["Attack"]["last_update"] == first_update
+
+    def test_skill_sensor_refreshed_on_change(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+        })
+        first_update = state.detail_sensors["Attack"]["last_update"]
+
+        import time
+        time.sleep(0.01)
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 2000, "level": 10}},
+        })
+        assert state.detail_sensors["Attack"]["last_update"] != first_update
+        assert state.detail_sensors["Attack"]["attributes"]["xp"] == 2000
 
 
 class TestAccountStore:
@@ -110,14 +152,17 @@ class TestAccountStore:
     def test_separate_accounts_separate_state(self):
         """Multiple accounts posting to the same store keep separate state."""
         store = AccountStore()
-        a = store.get_or_create("hashA", "PlayerA")
-        b = store.get_or_create("hashB", "PlayerB")
+        a = store.get_or_create(None, "PlayerA")
+        b = store.get_or_create(None, "PlayerB")
 
-        a.record_event("LEVEL", "a levelled", {"levelledSkills": {"Attack": 70}})
-        a.record_event("LEVEL", "a levelled again", {"levelledSkills": {"Attack": 71}})
-        b.record_event("DEATH", "b died", {"valueLost": 500})
+        a.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 70}},
+        })
+        b.update_player_data({
+            "skills": {"Defence": {"xp": 500, "level": 50}},
+        })
 
-        assert a.last_event_type == "LEVEL"
         assert "Attack" in a.detail_sensors
-        assert b.last_event_type == "DEATH"
-        assert len(b.detail_sensors) == 0
+        assert "Attack" not in b.detail_sensors
+        assert "Defence" in b.detail_sensors
+        assert "Defence" not in a.detail_sensors
