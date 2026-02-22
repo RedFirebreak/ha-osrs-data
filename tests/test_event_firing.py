@@ -112,72 +112,101 @@ def _make_json_request(hass, payload, token):
 
 # ── Sample payloads ──────────────────────────────────────────────────
 
+_BASE_PLAYER: dict[str, Any] = {
+    "name": "TestPlayer",
+    "accountType": "normal",
+    "world": "302",
+    "stats": {"skills": {}},
+    "inventory": {"items": []},
+    "equipment": {"items": []},
+}
+
 PAYLOAD_WITH_DEATH: dict[str, Any] = {
-    "player": {
-        "name": "TestPlayer",
-        "accountType": "normal",
-        "world": "302",
-        "stats": {"skills": {}},
-        "inventory": {"items": []},
-        "equipment": {"items": []},
-    },
+    "player": _BASE_PLAYER,
     "events": [
-        {"type": "DEATH", "data": {"killer": "Jad"}},
+        {
+            "type": "death",
+            "data": {
+                "valueLost": 88,
+                "danger": "DANGEROUS",
+                "killerName": "Guard",
+                "killerNpcId": 11917,
+                "keptItems": [
+                    {"name": "Amulet of fury", "id": 6585, "gePrice": 2391076, "haPrice": 121200, "quantity": 1},
+                ],
+                "lostItems": [
+                    {"name": "Bucket", "id": 1925, "gePrice": 5, "haPrice": 1, "quantity": 10},
+                    {"name": "Coins", "id": 995, "gePrice": 1, "haPrice": 0, "quantity": 30},
+                ],
+                "location": {"x": 3175, "y": 3433, "plane": 0},
+            },
+        },
     ],
 }
 
 PAYLOAD_WITH_LOOT: dict[str, Any] = {
-    "player": {
-        "name": "TestPlayer",
-        "accountType": "normal",
-        "world": "302",
-        "stats": {"skills": {}},
-        "inventory": {"items": []},
-        "equipment": {"items": []},
-    },
+    "player": _BASE_PLAYER,
     "events": [
-        {"type": "LOOT", "data": {"items": [{"id": 11286, "name": "Dragonfire shield"}]}},
+        {
+            "type": "loot",
+            "data": {
+                "items": [
+                    {"name": "Bones", "id": 526, "gePrice": 34, "haPrice": 0, "quantity": 1},
+                    {"name": "Coins", "id": 995, "gePrice": 1, "haPrice": 0, "quantity": 1},
+                ],
+                "highestValueItem": {"name": "Bones", "id": 526, "gePrice": 34, "haPrice": 0, "quantity": 1},
+                "totalValue": 35,
+                "source": {"text": "Guard", "link": "https://oldschool.runescape.wiki/w/Special:Search?search=Guard"},
+                "type": "NPC",
+                "npcId": 11916,
+                "criteria": [],
+            },
+        },
+    ],
+}
+
+PAYLOAD_WITH_PKLOOT: dict[str, Any] = {
+    "player": _BASE_PLAYER,
+    "events": [
+        {
+            "type": "pkLoot",
+            "data": {
+                "items": [
+                    {"name": "Bones", "id": 526, "gePrice": 34, "haPrice": 0, "quantity": 1},
+                ],
+                "highestValueItem": {"name": "Bones", "id": 526, "gePrice": 34, "haPrice": 0, "quantity": 1},
+                "totalValue": 34,
+                "source": {"text": "Player", "link": ""},
+                "type": "PLAYER",
+                "criteria": [],
+            },
+        },
+    ],
+}
+
+PAYLOAD_WITH_CLIENTSHUTDOWN: dict[str, Any] = {
+    "player": _BASE_PLAYER,
+    "events": [
+        {"type": "clientShutdown", "data": "Logout"},
     ],
 }
 
 PAYLOAD_WITH_MULTIPLE_EVENTS: dict[str, Any] = {
-    "player": {
-        "name": "TestPlayer",
-        "accountType": "normal",
-        "world": "302",
-        "stats": {"skills": {}},
-        "inventory": {"items": []},
-        "equipment": {"items": []},
-    },
+    "player": _BASE_PLAYER,
     "events": [
-        {"type": "DEATH", "data": {"killer": "Jad"}},
-        {"type": "LOOT", "data": {"items": [{"id": 995, "name": "Coins"}]}},
+        {"type": "death", "data": {"killerName": "Jad", "valueLost": 0}},
+        {"type": "loot", "data": {"items": [{"id": 995, "name": "Coins"}], "totalValue": 1}},
     ],
 }
 
 PAYLOAD_NO_EVENTS: dict[str, Any] = {
-    "player": {
-        "name": "TestPlayer",
-        "accountType": "normal",
-        "world": "302",
-        "stats": {"skills": {}},
-        "inventory": {"items": []},
-        "equipment": {"items": []},
-        "events": [],
-    },
+    "player": {**_BASE_PLAYER, "events": []},
 }
 
 PAYLOAD_WITH_EVENT_ID: dict[str, Any] = {
-    "player": {
-        "name": "TestPlayer",
-        "accountType": "normal",
-        "world": "302",
-        "stats": {"skills": {}},
-        "inventory": {"items": []},
-        "equipment": {"items": []},
-    },
+    "player": _BASE_PLAYER,
     "events": [
-        {"type": "DEATH", "event_id": "unique-death-123", "data": {"killer": "Jad"}},
+        {"type": "death", "event_id": "unique-death-123", "data": {"killerName": "Jad"}},
     ],
 }
 
@@ -206,7 +235,7 @@ class TestPerEventFiring:
         assert event_name == "osrs_data_event"
         assert event_data["account_name"] == "TestPlayer"
         assert event_data["event_type"] == "DEATH"
-        assert event_data["event_data"] == {"killer": "Jad"}
+        assert event_data["event_data"]["killerName"] == "Guard"
         assert "received_at" in event_data
 
     @pytest.mark.asyncio
@@ -288,6 +317,85 @@ class TestPerEventFiring:
         per_event = calls[1][0][1]
         assert per_event["event_data"] == {}
 
+    @pytest.mark.asyncio
+    async def test_death_event_parsed_correctly(self):
+        """Realistic death event fires with correct type and full data."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        request = _make_json_request(hass, PAYLOAD_WITH_DEATH, token)
+        await view.post(request)
+
+        calls = hass.bus.async_fire.call_args_list
+        per_event = calls[1][0][1]
+        assert per_event["event_type"] == "DEATH"
+        assert per_event["event_data"]["killerName"] == "Guard"
+        assert per_event["event_data"]["danger"] == "DANGEROUS"
+        assert per_event["event_data"]["valueLost"] == 88
+        assert len(per_event["event_data"]["keptItems"]) == 1
+        assert len(per_event["event_data"]["lostItems"]) == 2
+        assert per_event["event_data"]["location"] == {"x": 3175, "y": 3433, "plane": 0}
+
+    @pytest.mark.asyncio
+    async def test_loot_event_parsed_correctly(self):
+        """Realistic loot event fires with correct type and full data."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        request = _make_json_request(hass, PAYLOAD_WITH_LOOT, token)
+        await view.post(request)
+
+        calls = hass.bus.async_fire.call_args_list
+        per_event = calls[1][0][1]
+        assert per_event["event_type"] == "LOOT"
+        assert per_event["event_data"]["totalValue"] == 35
+        assert per_event["event_data"]["source"]["text"] == "Guard"
+        assert per_event["event_data"]["type"] == "NPC"
+        assert per_event["event_data"]["npcId"] == 11916
+        assert len(per_event["event_data"]["items"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_pkloot_event_parsed_correctly(self):
+        """Realistic pkLoot event fires with correct type and full data."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        request = _make_json_request(hass, PAYLOAD_WITH_PKLOOT, token)
+        await view.post(request)
+
+        calls = hass.bus.async_fire.call_args_list
+        per_event = calls[1][0][1]
+        assert per_event["event_type"] == "PKLOOT"
+        assert per_event["event_data"]["totalValue"] == 34
+        assert per_event["event_data"]["type"] == "PLAYER"
+        assert len(per_event["event_data"]["items"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_clientshutdown_event_parsed_correctly(self):
+        """Realistic clientShutdown event fires with correct type and string data."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        request = _make_json_request(hass, PAYLOAD_WITH_CLIENTSHUTDOWN, token)
+        await view.post(request)
+
+        calls = hass.bus.async_fire.call_args_list
+        per_event = calls[1][0][1]
+        assert per_event["event_type"] == "CLIENTSHUTDOWN"
+        assert per_event["event_data"] == "Logout"
+
+    @pytest.mark.asyncio
+    async def test_clientshutdown_marks_account_offline(self):
+        """clientShutdown event marks the account as offline via account_store."""
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+
+        # First: normal heartbeat
+        await view.post(_make_json_request(hass, PAYLOAD_NO_EVENTS, token))
+        acct = store.get_or_create(None, "TestPlayer")
+        assert acct.is_online is True
+
+        # Second: clientShutdown
+        await view.post(_make_json_request(hass, PAYLOAD_WITH_CLIENTSHUTDOWN, token))
+        assert acct.is_online is False
+        assert acct.offline_reason == "Logout"
+
 
 # ── Event deduplication tests ────────────────────────────────────────
 
@@ -359,17 +467,8 @@ class TestPerEventDeduplication:
         # Second request (same events) — note: base payload dedupe will catch this
         # so we need a slightly different base payload
         payload2 = {
-            "player": {
-                "name": "TestPlayer",
-                "accountType": "normal",
-                "world": "303",  # different world to bypass base dedupe
-                "stats": {"skills": {}},
-                "inventory": {"items": []},
-                "equipment": {"items": []},
-            },
-            "events": [
-                {"type": "DEATH", "data": {"killer": "Jad"}},
-            ],
+            "player": {**_BASE_PLAYER, "world": "303"},
+            "events": PAYLOAD_WITH_DEATH["events"],
         }
         await view.post(_make_json_request(hass, payload2, token))
 
@@ -387,16 +486,9 @@ class TestPerEventDeduplication:
         await view.post(_make_json_request(hass, PAYLOAD_WITH_EVENT_ID, token))
 
         payload2 = {
-            "player": {
-                "name": "TestPlayer",
-                "accountType": "normal",
-                "world": "303",
-                "stats": {"skills": {}},
-                "inventory": {"items": []},
-                "equipment": {"items": []},
-            },
+            "player": {**_BASE_PLAYER, "world": "303"},
             "events": [
-                {"type": "DEATH", "event_id": "unique-death-123", "data": {"killer": "Jad"}},
+                {"type": "death", "event_id": "unique-death-123", "data": {"killerName": "Jad"}},
             ],
         }
         await view.post(_make_json_request(hass, payload2, token))
