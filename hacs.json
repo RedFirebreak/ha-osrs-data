@@ -2,7 +2,5 @@
   "name": "OSRS Data",
   "filename": "osrs_data",
   "homeassistant": "2026.2.2",
-  "content_in_root": false,
-  "render_readme": true,
-  "country": "NL",
+  "country": "NL"
 }
