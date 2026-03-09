@@ -1,6 +1,5 @@
 {
   "name": "OSRS Data",
   "filename": "osrs_data",
-  "homeassistant": "2026.2.2",
-  "country": ["NL"]
+  "homeassistant": "2026.2.2"
 }
