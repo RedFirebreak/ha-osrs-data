@@ -121,8 +121,8 @@ blueprint:
 
     stagger_delay:
       name: Stagger delay (seconds)
-      description: Pause between each light when staggering.
-      default: 0.15
+      description: Delay between starting each light in the sequence (wave offset).
+      default: 0.25
       selector:
         number:
           min: 0
@@ -201,7 +201,7 @@ action:
           brightness: "{{ flash_brightness }}"
           transition: 0
 
-  # Flash loop — sync (all at once) or stagger (one-by-one)
+  # Flash loop — sync (all at once) or stagger (wave)
   - choose:
       - conditions:
           - condition: template
@@ -210,6 +210,7 @@ action:
           - repeat:
               count: "{{ flashes }}"
               sequence:
+                # Dim wave
                 - repeat:
                     for_each: "{{ lights }}"
                     sequence:
@@ -221,6 +222,12 @@ action:
                           transition: "{{ transition_seconds }}"
                       - delay:
                           seconds: "{{ stagger_delay }}"
+                - delay:
+                    seconds: "{{ pause_seconds }}"
+                # Bright wave
+                - repeat:
+                    for_each: "{{ lights }}"
+                    sequence:
                       - service: light.turn_on
                         target:
                           entity_id: "{{ repeat.item }}"
