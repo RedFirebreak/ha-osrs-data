@@ -114,6 +114,7 @@ trigger:
       event_type: !input event_type
 
 variables:
+  event_type_filter: !input event_type
   account_filter: !input account_name
   lights: !input lights
   only_if_any_on: !input only_if_any_on
@@ -125,9 +126,9 @@ variables:
   pause_seconds: !input pause_seconds
   restore_transition_seconds: !input restore_transition_seconds
 
-  # Unique scene_id per automation entity_id so multiple blueprints don't clash.
+  # Unique scene_id per automation so multiple blueprint imports don't clash.
   scene_id: >-
-    {{ 'osrs_data_flash_before_' ~ (this.entity_id | replace('.','_')) }}
+    {{ 'osrs_data_flash_' ~ (event_type_filter | lower) ~ '_' ~ (this.entity_id | replace('.','_')) }}
 
 condition:
   # Optional account filter
