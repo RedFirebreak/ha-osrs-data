@@ -6,6 +6,11 @@ blueprint:
     only run if any selected lights are already on. Restores the previous light states
     after flashing (scene snapshot).
 
+
+    Stagger mode requires the helper script "osrs_flash_single_light".
+    See blueprints/osrs-flash-single-light.yaml — copy it into your HA scripts
+    (Settings → Automations & Scenes → Scripts → + Add Script → YAML mode).
+
   domain: automation
 
   input:
@@ -201,43 +206,32 @@ action:
           brightness: "{{ flash_brightness }}"
           transition: 0
 
-  # Flash loop — sync (all at once) or stagger (wave)
+  # Flash loop — sync (all at once) or stagger (one-by-one via helper script)
   - choose:
       - conditions:
           - condition: template
             value_template: "{{ stagger_lights }}"
         sequence:
+          # Call the helper script per light with a stagger delay between each start.
+          # The script runs in mode: parallel, so each light blinks independently.
           - repeat:
-              count: "{{ flashes }}"
+              for_each: "{{ lights }}"
               sequence:
-                # Dim wave
-                - repeat:
-                    for_each: "{{ lights }}"
-                    sequence:
-                      - service: light.turn_on
-                        target:
-                          entity_id: "{{ repeat.item }}"
-                        data:
-                          brightness: "{{ dim_brightness }}"
-                          transition: "{{ transition_seconds }}"
-                      - delay:
-                          seconds: "{{ stagger_delay }}"
+                - service: script.osrs_flash_single_light
+                  data:
+                    light_entity: "{{ repeat.item }}"
+                    flash_brightness: "{{ flash_brightness }}"
+                    dim_brightness: "{{ dim_brightness }}"
+                    flashes: "{{ flashes }}"
+                    transition_seconds: "{{ transition_seconds }}"
+                    pause_seconds: "{{ pause_seconds }}"
                 - delay:
-                    seconds: "{{ pause_seconds }}"
-                # Bright wave
-                - repeat:
-                    for_each: "{{ lights }}"
-                    sequence:
-                      - service: light.turn_on
-                        target:
-                          entity_id: "{{ repeat.item }}"
-                        data:
-                          brightness: "{{ flash_brightness }}"
-                          transition: "{{ transition_seconds }}"
-                      - delay:
-                          seconds: "{{ stagger_delay }}"
-                - delay:
-                    seconds: "{{ pause_seconds }}"
+                    seconds: "{{ stagger_delay }}"
+          # Wait for all parallel script runs to finish before restoring.
+          # Total blink time ≈ flashes × 2 × (transition + pause).
+          - delay:
+              seconds: >-
+                {{ flashes * 2 * (transition_seconds + pause_seconds) }}
     default:
       - repeat:
           count: "{{ flashes }}"

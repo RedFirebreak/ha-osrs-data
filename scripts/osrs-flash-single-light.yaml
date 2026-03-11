@@ -1,0 +1,81 @@
+# Helper script for the "OSRS Data - Flash lights on event" blueprint.
+# Runs a blink cycle on a single light. Uses mode: parallel so the blueprint
+# can call it once per light — each invocation runs concurrently.
+#
+# Installation:
+#   Copy this file into your HA config as a script, or paste the contents
+#   into Settings → Automations & Scenes → Scripts → + Add Script (YAML mode).
+
+osrs_flash_single_light:
+  alias: "OSRS - Flash single light"
+  description: >
+    Blink-cycle helper for the OSRS flash blueprint.
+    Runs a dim↔bright loop on one light. Called in parallel for stagger mode.
+  mode: parallel
+  max: 20
+
+  fields:
+    light_entity:
+      description: The light entity to flash.
+      required: true
+      selector:
+        entity:
+          domain: light
+    flash_brightness:
+      description: Brightness at full flash (1-255).
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 255
+    dim_brightness:
+      description: Brightness at dim phase (0-255).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 255
+    flashes:
+      description: Number of dim↔bright cycles.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 20
+    transition_seconds:
+      description: Transition time per brightness change (seconds).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.05
+    pause_seconds:
+      description: Pause between brightness changes (seconds).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.05
+
+  sequence:
+    - repeat:
+        count: "{{ flashes }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: "{{ light_entity }}"
+            data:
+              brightness: "{{ dim_brightness }}"
+              transition: "{{ transition_seconds }}"
+          - delay:
+              seconds: "{{ pause_seconds }}"
+          - service: light.turn_on
+            target:
+              entity_id: "{{ light_entity }}"
+            data:
+              brightness: "{{ flash_brightness }}"
+              transition: "{{ transition_seconds }}"
+          - delay:
+              seconds: "{{ pause_seconds }}"
