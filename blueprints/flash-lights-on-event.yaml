@@ -112,6 +112,24 @@ blueprint:
           step: 0.1
           mode: slider
 
+    stagger_lights:
+      name: Stagger lights (one-by-one)
+      description: Flash lights sequentially instead of all at once.
+      default: false
+      selector:
+        boolean: {}
+
+    stagger_delay:
+      name: Stagger delay (seconds)
+      description: Pause between each light when staggering.
+      default: 0.15
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.05
+          mode: slider
+
 mode: single
 
 trigger:
@@ -133,6 +151,8 @@ variables:
   transition_seconds: !input transition_seconds
   pause_seconds: !input pause_seconds
   restore_transition_seconds: !input restore_transition_seconds
+  stagger_lights: !input stagger_lights
+  stagger_delay: !input stagger_delay
 
   # Unique scene_id per automation so multiple blueprint imports don't clash.
   scene_id: >-
@@ -181,26 +201,56 @@ action:
           brightness: "{{ flash_brightness }}"
           transition: 0
 
-  # Flash loop: dim -> bright, repeated
-  - repeat:
-      count: "{{ flashes }}"
-      sequence:
-        - service: light.turn_on
-          target:
-            entity_id: "{{ lights }}"
-          data:
-            brightness: "{{ dim_brightness }}"
-            transition: "{{ transition_seconds }}"
-        - delay:
-            seconds: "{{ pause_seconds }}"
-        - service: light.turn_on
-          target:
-            entity_id: "{{ lights }}"
-          data:
-            brightness: "{{ flash_brightness }}"
-            transition: "{{ transition_seconds }}"
-        - delay:
-            seconds: "{{ pause_seconds }}"
+  # Flash loop — sync (all at once) or stagger (one-by-one)
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ stagger_lights }}"
+        sequence:
+          - repeat:
+              count: "{{ flashes }}"
+              sequence:
+                - repeat:
+                    for_each: "{{ lights }}"
+                    sequence:
+                      - service: light.turn_on
+                        target:
+                          entity_id: "{{ repeat.item }}"
+                        data:
+                          brightness: "{{ dim_brightness }}"
+                          transition: "{{ transition_seconds }}"
+                      - delay:
+                          seconds: "{{ stagger_delay }}"
+                      - service: light.turn_on
+                        target:
+                          entity_id: "{{ repeat.item }}"
+                        data:
+                          brightness: "{{ flash_brightness }}"
+                          transition: "{{ transition_seconds }}"
+                      - delay:
+                          seconds: "{{ stagger_delay }}"
+                - delay:
+                    seconds: "{{ pause_seconds }}"
+    default:
+      - repeat:
+          count: "{{ flashes }}"
+          sequence:
+            - service: light.turn_on
+              target:
+                entity_id: "{{ lights }}"
+              data:
+                brightness: "{{ dim_brightness }}"
+                transition: "{{ transition_seconds }}"
+            - delay:
+                seconds: "{{ pause_seconds }}"
+            - service: light.turn_on
+              target:
+                entity_id: "{{ lights }}"
+              data:
+                brightness: "{{ flash_brightness }}"
+                transition: "{{ transition_seconds }}"
+            - delay:
+                seconds: "{{ pause_seconds }}"
 
   # Restore previous state
   - service: scene.turn_on
