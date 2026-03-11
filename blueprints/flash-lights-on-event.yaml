@@ -42,6 +42,13 @@ blueprint:
       selector:
         boolean: {}
 
+    change_flash_color:
+      name: Change flash color
+      description: Enable to pick a custom flash color. When disabled, lights flash in their current color.
+      default: false
+      selector:
+        boolean: {}
+
     flash_color:
       name: Flash color (RGB)
       default: [255, 160, 0]
@@ -118,6 +125,7 @@ variables:
   account_filter: !input account_name
   lights: !input lights
   only_if_any_on: !input only_if_any_on
+  change_flash_color: !input change_flash_color
   flash_color: !input flash_color
   flash_brightness: !input flash_brightness
   dim_brightness: !input dim_brightness
@@ -152,14 +160,26 @@ action:
       scene_id: "{{ scene_id }}"
       snapshot_entities: "{{ lights }}"
 
-  # Set initial flash color + brightness
-  - service: light.turn_on
-    target:
-      entity_id: "{{ lights }}"
-    data:
-      rgb_color: "{{ flash_color }}"
-      brightness: "{{ flash_brightness }}"
-      transition: 0
+  # Set initial flash brightness (and optionally color)
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ change_flash_color }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: "{{ lights }}"
+            data:
+              rgb_color: "{{ flash_color }}"
+              brightness: "{{ flash_brightness }}"
+              transition: 0
+    default:
+      - service: light.turn_on
+        target:
+          entity_id: "{{ lights }}"
+        data:
+          brightness: "{{ flash_brightness }}"
+          transition: 0
 
   # Flash loop: dim -> bright, repeated
   - repeat:
