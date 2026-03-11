@@ -444,7 +444,27 @@ automation:
           flash: short
 ```
 
-See `samples/runelite-post-request.md` for a full example of the payload sent by the HA Exporter plugin.
+See `tests/samples/runelite-post-request.md` for a full example of the payload sent by the HA Exporter plugin.
+
+## Implementation Examples
+
+The [`implementation/`](implementation/) folder contains ready-to-use Home Assistant **blueprints** and **scripts** that work with this integration:
+
+| Template | Type | Description |
+|----------|------|-------------|
+| Flash lights on event | Blueprint | Flashes selected lights when an OSRS event fires, with color/brightness options and automatic state restore |
+| Wave lights on event | Blueprint | Staggers (waves) light flashes one-by-one across multiple lights for a chase effect |
+| Flash single light | Script | Helper script used by the wave blueprint to run a blink cycle on one light |
+
+See the [implementation README](implementation/README.md) for full installation and usage instructions.
+
+## Project Structure
+
+```
+custom_components/osrs_data/   # The integration itself
+implementation/                 # Blueprints & scripts for Home Assistant
+tests/                          # Automated test suite
+```
 
 ## Privacy & Security
 
@@ -459,3 +479,4 @@ See `samples/runelite-post-request.md` for a full example of the payload sent by
 - [Async / Blocking Operations](https://developers.home-assistant.io/docs/asyncio_blocking_operations/)
 - [Config Flow](https://developers.home-assistant.io/docs/config_entries_config_flow_handler/)
 - [Options Flow](https://developers.home-assistant.io/docs/config_entries_options_flow_handler/)
+- [Blueprint Documentation](https://www.home-assistant.io/docs/automation/using_blueprints/)
