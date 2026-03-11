@@ -1,0 +1,189 @@
+blueprint:
+  name: OSRS Data - Flash lights on event (with restore)
+  description: >
+    Flashes selected lights when the OSRS Data integration fires an osrs_data_event
+    matching the chosen event_type. Optionally restrict by account_name, and optionally
+    only run if any selected lights are already on. Restores the previous light states
+    after flashing (scene snapshot).
+
+  domain: automation
+
+  input:
+    event_type:
+      name: Event type
+      description: Which OSRS event should trigger the flash
+      selector:
+        select:
+          options:
+            - CLIENTSHUTDOWN
+            - DEATH
+            - LEVELUP
+            - LOOT
+            - PKLOOT
+
+    account_name:
+      name: Account name (optional)
+      description: Leave empty to trigger for any account. Must match trigger.event.data.account_name
+      default: ""
+      selector:
+        text: {}
+
+    lights:
+      name: Lights to flash
+      description: Select one or more lights to flash
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    only_if_any_on:
+      name: Only flash if any selected light is already on
+      default: true
+      selector:
+        boolean: {}
+
+    flash_color:
+      name: Flash color (RGB)
+      default: [255, 160, 0]
+      selector:
+        color_rgb: {}
+
+    flash_brightness:
+      name: Flash brightness (0-255)
+      default: 255
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: slider
+
+    dim_brightness:
+      name: Dim brightness (0-255)
+      default: 40
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: slider
+
+    flashes:
+      name: Number of flashes
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: slider
+
+    transition_seconds:
+      name: Transition (seconds) for each brightness change
+      default: 0.15
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.05
+          mode: slider
+
+    pause_seconds:
+      name: Pause (seconds) between brightness changes
+      default: 0.25
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.05
+          mode: slider
+
+    restore_transition_seconds:
+      name: Restore transition (seconds)
+      default: 0.5
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.1
+          mode: slider
+
+mode: single
+
+trigger:
+  - platform: event
+    event_type: osrs_data_event
+    event_data:
+      event_type: !input event_type
+
+variables:
+  account_filter: !input account_name
+  lights: !input lights
+  only_if_any_on: !input only_if_any_on
+  flash_color: !input flash_color
+  flash_brightness: !input flash_brightness
+  dim_brightness: !input dim_brightness
+  flashes: !input flashes
+  transition_seconds: !input transition_seconds
+  pause_seconds: !input pause_seconds
+  restore_transition_seconds: !input restore_transition_seconds
+
+  # Unique scene_id per automation entity_id so multiple blueprints don't clash.
+  scene_id: >-
+    {{ 'osrs_data_flash_before_' ~ (this.entity_id | replace('.','_')) }}
+
+condition:
+  # Optional account filter
+  - condition: template
+    value_template: >-
+      {{ account_filter == '' or (trigger.event.data.account_name | default('') == account_filter) }}
+
+  # Optional "only if already on"
+  - condition: template
+    value_template: >-
+      {% if not only_if_any_on %}
+        true
+      {% else %}
+        {{ expand(lights) | selectattr('state','eq','on') | list | length > 0 }}
+      {% endif %}
+
+action:
+  # Snapshot current state so we can restore afterwards
+  - service: scene.create
+    data:
+      scene_id: "{{ scene_id }}"
+      snapshot_entities: "{{ lights }}"
+
+  # Set initial flash color + brightness
+  - service: light.turn_on
+    target:
+      entity_id: "{{ lights }}"
+    data:
+      rgb_color: "{{ flash_color }}"
+      brightness: "{{ flash_brightness }}"
+      transition: 0
+
+  # Flash loop: dim -> bright, repeated
+  - repeat:
+      count: "{{ flashes }}"
+      sequence:
+        - service: light.turn_on
+          target:
+            entity_id: "{{ lights }}"
+          data:
+            brightness: "{{ dim_brightness }}"
+            transition: "{{ transition_seconds }}"
+        - delay:
+            seconds: "{{ pause_seconds }}"
+        - service: light.turn_on
+          target:
+            entity_id: "{{ lights }}"
+          data:
+            brightness: "{{ flash_brightness }}"
+            transition: "{{ transition_seconds }}"
+        - delay:
+            seconds: "{{ pause_seconds }}"
+
+  # Restore previous state
+  - service: scene.turn_on
+    target:
+      entity_id: "{{ 'scene.' ~ scene_id }}"
+    data:
+      transition: "{{ restore_transition_seconds }}"
