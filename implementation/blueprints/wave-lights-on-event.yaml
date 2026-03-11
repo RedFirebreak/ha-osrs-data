@@ -1,0 +1,232 @@
+blueprint:
+  name: OSRS Data - Wave lights on event (with restore)
+  description: >
+    Waves (staggers) selected lights one-by-one when the OSRS Data integration fires
+    an osrs_data_event matching the chosen event_type. Each light runs its own
+    independent blink cycle, offset by a configurable delay to create a chase/wave
+    effect. Optionally restrict by account_name, and optionally only run if any
+    selected lights are already on. Restores the previous light states after
+    flashing (scene snapshot).
+
+
+    Requires the helper script "osrs_flash_single_light".
+    See scripts/osrs-flash-single-light.yaml — install it via
+    Settings → Automations & Scenes → Scripts → + Add Script → YAML mode.
+
+  domain: automation
+
+  input:
+    event_type:
+      name: Event type
+      description: Which OSRS event should trigger the wave
+      selector:
+        select:
+          options:
+            - CLIENTSHUTDOWN
+            - DEATH
+            - LEVELUP
+            - LOOT
+            - PKLOOT
+
+    account_name:
+      name: Account name (optional)
+      description: Leave empty to trigger for any account. Must match trigger.event.data.account_name
+      default: ""
+      selector:
+        text: {}
+
+    lights:
+      name: Lights to wave
+      description: Select one or more lights. They will flash one-by-one in list order.
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    only_if_any_on:
+      name: Only flash if any selected light is already on
+      default: true
+      selector:
+        boolean: {}
+
+    change_flash_color:
+      name: Change flash color
+      description: Enable to pick a custom flash color. When disabled, lights flash in their current color.
+      default: false
+      selector:
+        boolean: {}
+
+    flash_color:
+      name: Flash color (RGB)
+      default: [255, 160, 0]
+      selector:
+        color_rgb: {}
+
+    flash_brightness:
+      name: Flash brightness (0-255)
+      default: 255
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: slider
+
+    dim_brightness:
+      name: Dim brightness (0-255)
+      default: 40
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: slider
+
+    flashes:
+      name: Number of flashes
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: slider
+
+    transition_seconds:
+      name: Transition (seconds) for each brightness change
+      default: 0.15
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.05
+          mode: slider
+
+    pause_seconds:
+      name: Pause (seconds) between brightness changes
+      default: 0.25
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.05
+          mode: slider
+
+    stagger_delay:
+      name: Stagger delay (seconds)
+      description: Delay between starting each light's blink cycle (wave offset).
+      default: 0.25
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.05
+          mode: slider
+
+    restore_transition_seconds:
+      name: Restore transition (seconds)
+      default: 0.5
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.1
+          mode: slider
+
+mode: single
+
+trigger:
+  - platform: event
+    event_type: osrs_data_event
+    event_data:
+      event_type: !input event_type
+
+variables:
+  event_type_filter: !input event_type
+  account_filter: !input account_name
+  lights: !input lights
+  only_if_any_on: !input only_if_any_on
+  change_flash_color: !input change_flash_color
+  flash_color: !input flash_color
+  flash_brightness: !input flash_brightness
+  dim_brightness: !input dim_brightness
+  flashes: !input flashes
+  transition_seconds: !input transition_seconds
+  pause_seconds: !input pause_seconds
+  stagger_delay: !input stagger_delay
+  restore_transition_seconds: !input restore_transition_seconds
+
+  # Unique scene_id per automation so multiple blueprint imports don't clash.
+  scene_id: >-
+    {{ 'osrs_data_wave_' ~ (event_type_filter | lower) ~ '_' ~ (this.entity_id | replace('.','_')) }}
+
+condition:
+  # Optional account filter
+  - condition: template
+    value_template: >-
+      {{ account_filter == '' or (trigger.event.data.account_name | default('') == account_filter) }}
+
+  # Optional "only if already on"
+  - condition: template
+    value_template: >-
+      {% if not only_if_any_on %}
+        true
+      {% else %}
+        {{ expand(lights) | selectattr('state','eq','on') | list | length > 0 }}
+      {% endif %}
+
+action:
+  # Snapshot current state so we can restore afterwards
+  - service: scene.create
+    data:
+      scene_id: "{{ scene_id }}"
+      snapshot_entities: "{{ lights }}"
+
+  # Set initial flash brightness (and optionally color) on all lights
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ change_flash_color }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: "{{ lights }}"
+            data:
+              rgb_color: "{{ flash_color }}"
+              brightness: "{{ flash_brightness }}"
+              transition: 0
+    default:
+      - service: light.turn_on
+        target:
+          entity_id: "{{ lights }}"
+        data:
+          brightness: "{{ flash_brightness }}"
+          transition: 0
+
+  # Kick off each light's blink cycle with a stagger delay between starts.
+  # script.turn_on fires-and-forgets so the loop continues immediately.
+  - repeat:
+      for_each: "{{ lights }}"
+      sequence:
+        - service: script.turn_on
+          target:
+            entity_id: script.osrs_flash_single_light
+          data:
+            variables:
+              light_entity: "{{ repeat.item }}"
+              flash_brightness: "{{ flash_brightness }}"
+              dim_brightness: "{{ dim_brightness }}"
+              flashes: "{{ flashes }}"
+              transition_seconds: "{{ transition_seconds }}"
+              pause_seconds: "{{ pause_seconds }}"
+        - delay:
+            seconds: "{{ stagger_delay }}"
+
+  # Wait for all parallel blink cycles to finish before restoring.
+  - delay:
+      seconds: >-
+        {{ flashes * 2 * (transition_seconds + pause_seconds) }}
+
+  # Restore previous state
+  - service: scene.turn_on
+    target:
+      entity_id: "{{ 'scene.' ~ scene_id }}"
+    data:
+      transition: "{{ restore_transition_seconds }}"

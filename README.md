@@ -4,11 +4,15 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=RedFirebreak&category=Integration&repository=ha-osrs-data)
 
-A Home Assistant custom integration that receives real-time player data from a RuneLite plugin and turns it into:
+A Home Assistant custom integration that receives real-time player data from the [HA Exporter](https://github.com/xXD4rkDragonXx/runelite-homeassistant-data-exporter) RuneLite plugin and turns it into:
 - Rich sensors/entities per account (stats, inventory, equipment, health, prayer, location, spellbook)
 - Home Assistant events (for automations)
 - Persistent state (account data survives restarts)
 - Automatic deduplication of retried submissions
+
+## Companion Plugin
+
+This integration requires the **[HA Exporter](https://github.com/xXD4rkDragonXx/runelite-homeassistant-data-exporter)** plugin for RuneLite. You can find it on the [RuneLite Plugin Hub](https://runelite.net/plugin-hub/) by searching for **HA Exporter**.
 
 ## Installation
 
@@ -24,28 +28,32 @@ Copy `custom_components/osrs_data` from this repository into your Home Assistant
 
 ## Setup & Pairing
 
+### Prerequisites
+- The **[HA Exporter](https://github.com/xXD4rkDragonXx/runelite-homeassistant-data-exporter)** plugin installed in RuneLite (search for **HA Exporter** on the RuneLite Plugin Hub)
+
 ### First-time setup
-After HACS / manual installation of the plugin.
+After HACS / manual installation of the integration:
 1. Go to **Settings → Devices & services → Add integration**
 2. Search for **OSRS Data**
 3. Enter a name for the integration → **Next**
 4. A **pairing code** is displayed
-5. In your RuneLite plugin, enter the code and your HA URL to pair
+5. In the **HA Exporter** RuneLite plugin, enter the code and your HA URL to pair
 6. Click **Submit** in Home Assistant — done!
 
 The plugin receives a device-specific token and uses it for all future requests.
 
-## Configuring the Runelite plugin
-1. With your **pairing code** ready, open the plugin's sidepanel.
-2. Enter the pairing-setting menu
-3. Configure HA-Data-exporter to point at your Home Assistant URL:
+## Configuring the HA Exporter RuneLite plugin
+1. Install **[HA Exporter](https://github.com/xXD4rkDragonXx/runelite-homeassistant-data-exporter)** from the RuneLite Plugin Hub.
+2. With your **pairing code** ready, open the plugin's sidepanel.
+3. Enter the pairing-setting menu.
+4. Configure HA Exporter to point at your Home Assistant URL:
    ```
    https://<your-ha-domain>/
    ```
-4. Enter your **pairing code**.
-5. Click the "pair" button
-6. Check your active pairing in the sidepanel
-7. (if not done already) Finish the integration setup in Home Assistant
+5. Enter your **pairing code**.
+6. Click the "pair" button.
+7. Check your active pairing in the sidepanel.
+8. (if not done already) Finish the integration setup in Home Assistant.
 
 
 ### Pairing additional clients
@@ -118,11 +126,11 @@ Account state, paired devices, and history are persisted to disk via Home Assist
 
 ### Event deduplication
 
-If the RuneLite plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a 30-second window. Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `event_id` field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
+If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a 30-second window. Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `event_id` field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
 
 ### Event types
 
-The RuneLite plugin sends events in the `events[]` array of each payload. The integration fires an individual `osrs_data_event` on the HA event bus for each event, with flat fields for easy automation matching.
+The HA Exporter plugin sends events in the `events[]` array of each payload. The integration fires an individual `osrs_data_event` on the HA event bus for each event, with flat fields for easy automation matching.
 
 | Event type (raw) | Normalized `event_type` | Description |
 |---|---|---|
@@ -436,7 +444,27 @@ automation:
           flash: short
 ```
 
-See `samples/runelite-post-request.md` for a full example of the payload sent by the RuneLite plugin.
+See `tests/samples/runelite-post-request.md` for a full example of the payload sent by the HA Exporter plugin.
+
+## Implementation Examples
+
+The [`implementation/`](implementation/) folder contains ready-to-use Home Assistant **blueprints** and **scripts** that work with this integration:
+
+| Template | Type | Description |
+|----------|------|-------------|
+| Flash lights on event | Blueprint | Flashes selected lights when an OSRS event fires, with color/brightness options and automatic state restore |
+| Wave lights on event | Blueprint | Staggers (waves) light flashes one-by-one across multiple lights for a chase effect |
+| Flash single light | Script | Helper script used by the wave blueprint to run a blink cycle on one light |
+
+See the [implementation README](implementation/README.md) for full installation and usage instructions.
+
+## Project Structure
+
+```
+custom_components/osrs_data/   # The integration itself
+implementation/                 # Blueprints & scripts for Home Assistant
+tests/                          # Automated test suite
+```
 
 ## Privacy & Security
 
@@ -451,3 +479,4 @@ See `samples/runelite-post-request.md` for a full example of the payload sent by
 - [Async / Blocking Operations](https://developers.home-assistant.io/docs/asyncio_blocking_operations/)
 - [Config Flow](https://developers.home-assistant.io/docs/config_entries_config_flow_handler/)
 - [Options Flow](https://developers.home-assistant.io/docs/config_entries_options_flow_handler/)
+- [Blueprint Documentation](https://www.home-assistant.io/docs/automation/using_blueprints/)
