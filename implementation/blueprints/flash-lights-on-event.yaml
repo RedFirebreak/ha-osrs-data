@@ -20,6 +20,9 @@ blueprint:
             - LEVELUP
             - LOOT
             - PKLOOT
+            - SUPERIORSPAWN
+            - ACHIEVEMENTDIARY
+            - COMBATTASK
 
     account_name:
       name: Account name (optional)

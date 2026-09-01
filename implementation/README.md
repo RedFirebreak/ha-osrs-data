@@ -52,7 +52,7 @@ Both blueprints share the following configurable inputs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| **Event type** | Which OSRS event triggers the flash (`DEATH`, `LEVELUP`, `LOOT`, `PKLOOT`, `CLIENTSHUTDOWN`) | *(required)* |
+| **Event type** | Which OSRS event triggers the flash (`DEATH`, `LEVELUP`, `LOOT`, `PKLOOT`, `CLIENTSHUTDOWN`, `SUPERIORSPAWN`, `ACHIEVEMENTDIARY`, `COMBATTASK`) | *(required)* |
 | **Account name** | Restrict to a specific account (leave empty for all) | *(empty)* |
 | **Lights** | One or more light entities to flash | *(required)* |
 | **Only flash if any light is on** | Skip flashing if all selected lights are off | `true` |

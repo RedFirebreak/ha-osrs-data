@@ -139,6 +139,9 @@ The HA Exporter plugin sends events in the `events[]` array of each payload. The
 | `levelUp` | `LEVELUP` | In-game level up for one or more skills |
 | `loot` | `LOOT` | NPC or other loot drop |
 | `pkLoot` | `PKLOOT` | PvP loot (player kill) |
+| `superiorSpawn` | `SUPERIORSPAWN` | Superior slayer monster spawned (`name`, `npcId`, `location`) |
+| `achievementDiary` | `ACHIEVEMENTDIARY` | Achievement diary task/tier completed |
+| `combatTask` | `COMBATTASK` | Combat Achievement task completed |
 
 Each event type also creates a counter sensor (e.g. `sensor.<account>_death_total`) that tracks the total number of events received and exposes a `last_fired` attribute.
 
