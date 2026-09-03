@@ -24,7 +24,7 @@ Ready-to-use Home Assistant blueprints, scripts, and dashboards for the [OSRS Da
 
 | File | Name | Description |
 |------|------|-------------|
-| `dashboards/osrs-overview.yaml` | OSRS overview | Example Lovelace view: player status, vitals, wealth, combat/total level, and recent deaths/loot. Replace `myrsn` in the entity IDs with your account slug. |
+| `dashboards/osrs-overview.yaml` | OSRS overview | Example Lovelace view: player status, vitals, combat/total level, and recent deaths/loot. Replace `myrsn` in the entity IDs with your account slug. |
 
 ## Installation
 

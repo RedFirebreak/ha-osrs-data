@@ -6,7 +6,7 @@
 # sensor.osrs_<account>_<name> — check Developer Tools → States).
 #
 # This view showcases the sensors added by the integration, including the
-# Wealth, Total Level, Combat Level, Last Death and Last Loot sensors.
+# Total Level, Combat Level, Last Death and Last Loot sensors.
 
 title: OSRS
 path: osrs
@@ -38,8 +38,6 @@ cards:
         name: Combat
       - entity: sensor.osrs_myrsn_total_level
         name: Total level
-      - entity: sensor.osrs_myrsn_wealth
-        name: Wealth (gp)
       - entity: sensor.osrs_myrsn_location
         name: Location
 

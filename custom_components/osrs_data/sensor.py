@@ -71,7 +71,6 @@ async def async_setup_entry(
             new_entities.append(OsrsLocationSensor(entry, state, slug))
             new_entities.append(OsrsSpellbookSensor(entry, state, slug))
             new_entities.append(OsrsGameStateSensor(entry, state, slug))
-            new_entities.append(OsrsWealthSensor(entry, state, slug))
             new_entities.append(OsrsTotalLevelSensor(entry, state, slug))
             new_entities.append(OsrsCombatLevelSensor(entry, state, slug))
             new_entities.append(OsrsLastDeathSensor(entry, state, slug))
@@ -557,69 +556,6 @@ class OsrsGameStateSensor(SensorEntity):
         )
 
 
-# ── Wealth sensor ───────────────────────────────────────────────────
-
-
-class OsrsWealthSensor(SensorEntity):
-    """Total GE/HA value of the player's inventory and worn equipment."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Wealth"
-    _attr_native_unit_of_measurement = "gp"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(
-        self,
-        entry: ConfigEntry,
-        state: AccountState,
-        slug: str,
-    ) -> None:
-        self._entry = entry
-        self._state = state
-        self._attr_unique_id = f"{state.account_hash}_wealth"
-
-    @property
-    def native_value(self) -> int:
-        """Combined GE value of inventory + equipment."""
-        return self._state.inventory_value("gePrice") + self._state.equipment_value(
-            "gePrice"
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        inv_ge = self._state.inventory_value("gePrice")
-        eq_ge = self._state.equipment_value("gePrice")
-        inv_ha = self._state.inventory_value("haPrice")
-        eq_ha = self._state.equipment_value("haPrice")
-        attrs: dict[str, Any] = {
-            "inventory_ge_value": inv_ge,
-            "equipment_ge_value": eq_ge,
-            "inventory_ha_value": inv_ha,
-            "equipment_ha_value": eq_ha,
-            "total_ge_value": inv_ge + eq_ge,
-            "total_ha_value": inv_ha + eq_ha,
-        }
-        if self._state.last_update:
-            attrs["last_update"] = self._state.last_update
-        return attrs
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
-
-    @callback
-    def _handle_update(self, account_hash: str) -> None:
-        if account_hash == self._state.account_hash:
-            self.async_write_ha_state()
-
-    async def async_added_to_hass(self) -> None:
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
-            )
-        )
-
-
 # ── Total Level sensor ──────────────────────────────────────────────
 
 
@@ -817,15 +753,21 @@ class OsrsLastLootSensor(SensorEntity):
 
     @property
     def native_value(self) -> str | None:
+        """The most notable item from the drop (not the NPC/source)."""
         loot = self._state.last_loot
         if not loot:
             return None
-        source = loot.get("source")
-        if isinstance(source, dict) and source.get("text"):
-            return source["text"]
         highest = loot.get("highestValueItem")
         if isinstance(highest, dict) and highest.get("name"):
             return highest["name"]
+        items = loot.get("items")
+        if isinstance(items, list) and items:
+            first = items[0]
+            if isinstance(first, dict) and first.get("name"):
+                return first["name"]
+        source = loot.get("source")
+        if isinstance(source, dict) and source.get("text"):
+            return source["text"]
         return "Loot"
 
     @property

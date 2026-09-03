@@ -1,4 +1,4 @@
-"""Tests for wealth/aggregate helpers, rich event state, and history recording."""
+"""Tests for skill aggregates, rich event state, and history recording."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ if _root not in sys.path:
 from custom_components.osrs_data.account_store import (  # noqa: E402
     AccountState,
     AccountStore,
+    _level_from_xp,
 )
 from custom_components.osrs_data.api import OsrsEventsView  # noqa: E402
 from custom_components.osrs_data.const import (  # noqa: E402
@@ -71,53 +72,73 @@ from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
 # ── Computed aggregates ─────────────────────────────────────────────
 
 
-class TestWealth:
-    def test_inventory_value_ge_and_ha(self):
-        state = AccountState("h", "P")
-        state.inventory = [
-            {"name": "Shark", "gePrice": 800, "haPrice": 400, "quantity": 5},
-            {"name": "Coins", "gePrice": 1, "haPrice": 1, "quantity": 1000},
-        ]
-        assert state.inventory_value("gePrice") == 800 * 5 + 1000
-        assert state.inventory_value("haPrice") == 400 * 5 + 1000
+# Well-known OSRS XP → level anchors.
+_XP_L1 = 0
+_XP_L2 = 83
+_XP_L10 = 1154
+_XP_L92 = 6_517_253
+_XP_L99 = 13_034_431
 
-    def test_equipment_value_skips_empty_slots(self):
-        state = AccountState("h", "P")
-        state.equipment = {
-            "WEAPON": {"gePrice": 10_000, "haPrice": 6_000, "quantity": 1},
-            "HEAD": {},  # empty slot must not contribute
-        }
-        assert state.equipment_value("gePrice") == 10_000
-        assert state.equipment_value("haPrice") == 6_000
 
-    def test_value_handles_missing_fields(self):
-        state = AccountState("h", "P")
-        state.inventory = [{"name": "Mystery"}]  # no price/quantity
-        assert state.inventory_value("gePrice") == 0
+class TestLevelFromXp:
+    def test_known_anchors(self):
+        assert _level_from_xp(_XP_L1) == 1
+        assert _level_from_xp(-5) == 1
+        assert _level_from_xp(_XP_L2) == 2
+        assert _level_from_xp(_XP_L10) == 10
+        assert _level_from_xp(_XP_L92) == 92
+        assert _level_from_xp(_XP_L99) == 99
+        # Virtual levels are capped at 99.
+        assert _level_from_xp(200_000_000) == 99
 
 
 class TestAggregates:
-    _SKILLS = {
-        "Attack": {"xp": 737627, "level": 60},
-        "Strength": {"xp": 900000, "level": 70},
-        "Defence": {"xp": 123456, "level": 50},
-        "Hitpoints": {"xp": 1234567, "level": 75},
-        "Ranged": {"xp": 500000, "level": 55},
-        "Prayer": {"xp": 200000, "level": 43},
-        "Magic": {"xp": 400000, "level": 59},
-    }
-
-    def test_total_level_and_xp(self):
+    def test_total_level_is_derived_from_xp(self):
         state = AccountState("h", "P")
-        state.skills = dict(self._SKILLS)
-        assert state.total_level == 60 + 70 + 50 + 75 + 55 + 43 + 59
-        assert state.total_xp == sum(s["xp"] for s in self._SKILLS.values())
+        # Deliberately give a boosted/wrong `level` field to prove it is
+        # ignored — levels come from XP.
+        state.skills = {
+            "Attack": {"xp": _XP_L99, "level": 120},
+            "Strength": {"xp": _XP_L92, "level": 120},
+            "Defence": {"xp": _XP_L10, "level": 120},
+            "Cooking": {"xp": _XP_L1, "level": 120},
+        }
+        assert state.total_level == 99 + 92 + 10 + 1
+        assert state.total_xp == _XP_L99 + _XP_L92 + _XP_L10 + _XP_L1
 
-    def test_combat_level(self):
+    def test_combat_level_maxed(self):
         state = AccountState("h", "P")
-        state.skills = dict(self._SKILLS)
-        # base=0.25*(50+75+21)=36.5, melee=0.325*130=42.25 -> floor(78.75)=78
-        assert state.combat_level == 78
+        state.skills = {
+            s: {"xp": _XP_L99}
+            for s in (
+                "Attack",
+                "Strength",
+                "Defence",
+                "Hitpoints",
+                "Ranged",
+                "Prayer",
+                "Magic",
+            )
+        }
+        # All 99s -> max combat level 126.
+        assert state.combat_level == 126
+
+    def test_combat_level_ignores_boosted_level_field(self):
+        # 99 Att/Str/Def/HP/Range/Magic + 92 Prayer.
+        # base=0.25*(99+99+46)=61.0, melee=0.325*198=64.35 -> floor(125.35)=125.
+        # The inflated `level` fields must be ignored (XP wins).
+        state = AccountState("h", "P")
+        levels_xp = {
+            "Attack": _XP_L99,
+            "Strength": _XP_L99,
+            "Defence": _XP_L99,
+            "Hitpoints": _XP_L99,
+            "Ranged": _XP_L99,
+            "Magic": _XP_L99,
+            "Prayer": _XP_L92,
+        }
+        state.skills = {k: {"xp": v, "level": 130} for k, v in levels_xp.items()}
+        assert state.combat_level == 125
 
     def test_combat_level_none_without_skills(self):
         assert AccountState("h", "P").combat_level is None

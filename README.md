@@ -100,7 +100,6 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update` |
 | **Spellbook** | Active spellbook name | `id`, `last_update` |
 | **Game State** | RuneLite client game state | `last_update` |
-| **Wealth** | Combined GE value of inventory + equipment (gp) | `inventory_ge_value`, `equipment_ge_value`, `inventory_ha_value`, `equipment_ha_value`, `total_ge_value`, `total_ha_value` |
 | **Total Level** | Sum of all skill levels | `total_xp`, `skill_count`, `last_update` |
 | **Combat Level** | Computed OSRS combat level | `last_update` |
 | **Last Death** | Killer name of the most recent death | `value_lost`, `danger`, `killer_name`, `killer_npc_id`, `kept_items`, `lost_items`, `location`, `timestamp`, `recent` |
@@ -108,7 +107,7 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **\<Skill\> Level** *(per skill)* | Skill level | `xp`, `last_update` |
 | **\<EVENT\> Total** *(per event type)* | Cumulative event count | `last_fired` |
 
-Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Wealth**, **Total Level** and **Combat Level** are computed from data already in each payload (item GE/HA prices and skill levels). **Last Death** and **Last Loot** populate the first time such an event arrives; their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)).
+Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death** and **Last Loot** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)).
 
 ### Game State Values
 
@@ -497,7 +496,7 @@ The [`implementation/`](implementation/) folder contains ready-to-use Home Assis
 | Notify on valuable loot | Blueprint | Notifies when LOOT/PKLOOT `totalValue` meets a configurable threshold |
 | Low HP alert | Blueprint | Notifies (and optionally flashes a light red) when a Health sensor drops below a threshold |
 | Flash single light | Script | Helper script used by the wave blueprint to run a blink cycle on one light |
-| OSRS overview | Dashboard | Example Lovelace view showing vitals, wealth, gear, and recent deaths/loot |
+| OSRS overview | Dashboard | Example Lovelace view showing vitals, levels, gear, and recent deaths/loot |
 
 See the [implementation README](implementation/README.md) for full installation and usage instructions.
 

@@ -19,6 +19,24 @@ def _normalize_player_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
+def _level_from_xp(xp: int) -> int:
+    """Return the real (unboosted) skill level for a given total XP.
+
+    Uses the standard OSRS experience formula, capped at level 99.
+    Deriving levels from XP is exactly how the game computes total and
+    combat level, so it is immune to boosted / virtual "levels" that a
+    client may report in the ``level`` field.
+    """
+    if not xp or xp <= 0:
+        return 1
+    points = 0
+    for level in range(1, 99):  # thresholds for levels 2..99
+        points += math.floor(level + 300 * (2 ** (level / 7.0)))
+        if math.floor(points / 4) > xp:
+            return level
+    return 99
+
+
 class AccountState:
     """Per-account player state and detail sensors."""
 
@@ -193,29 +211,10 @@ class AccountState:
 
     # ── Computed aggregates ─────────────────────────────────────────
 
-    @staticmethod
-    def _item_value(item: dict[str, Any], price_key: str) -> int:
-        """Value of a single item = unit price × quantity (0 if missing)."""
-        if not isinstance(item, dict):
-            return 0
-        return int(item.get(price_key, 0) or 0) * int(item.get("quantity", 0) or 0)
-
-    def inventory_value(self, price_key: str = "gePrice") -> int:
-        """Total value of the inventory for *price_key* (gePrice/haPrice)."""
-        return sum(self._item_value(item, price_key) for item in self.inventory)
-
-    def equipment_value(self, price_key: str = "gePrice") -> int:
-        """Total value of worn equipment for *price_key* (gePrice/haPrice)."""
-        return sum(
-            self._item_value(item, price_key)
-            for item in self.equipment.values()
-            if item
-        )
-
     @property
     def total_level(self) -> int:
-        """Sum of all skill levels."""
-        return sum(skill.get("level", 0) for skill in self.skills.values())
+        """Sum of all real skill levels (derived from XP, to match the game)."""
+        return sum(_level_from_xp(skill.get("xp", 0)) for skill in self.skills.values())
 
     @property
     def total_xp(self) -> int:
@@ -224,15 +223,20 @@ class AccountState:
 
     @property
     def combat_level(self) -> int | None:
-        """OSRS combat level from combat skill levels.
+        """OSRS combat level from real combat skill levels.
 
-        Returns ``None`` until the combat skills have been received.
+        Levels are derived from XP so the result matches the game exactly
+        (boosted / virtual levels reported in the ``level`` field are
+        ignored).  Returns ``None`` until any skill data has arrived.
         """
         if not self.skills:
             return None
 
         def lvl(name: str) -> int:
-            return self.skills.get(name, {}).get("level", 1)
+            skill = self.skills.get(name)
+            if not skill:
+                return 1
+            return _level_from_xp(skill.get("xp", 0))
 
         base = 0.25 * (lvl("Defence") + lvl("Hitpoints") + math.floor(lvl("Prayer") / 2))
         melee = 0.325 * (lvl("Attack") + lvl("Strength"))

@@ -62,7 +62,6 @@ from custom_components.osrs_data.sensor import (  # noqa: E402
     OsrsEquipmentSensor,
     OsrsAccountDetailSensor,
     OsrsGameStateSensor,
-    OsrsWealthSensor,
     OsrsTotalLevelSensor,
     OsrsCombatLevelSensor,
     OsrsLastDeathSensor,
@@ -293,56 +292,37 @@ class TestOsrsGameStateSensor:
         assert "last_update" in attrs
 
 
-class TestOsrsWealthSensor:
-    """Tests for the OsrsWealthSensor entity."""
-
-    def test_combined_ge_value(self):
-        entry = _make_entry()
-        state = AccountState("hash1", "Player")
-        state.inventory = [{"gePrice": 100, "haPrice": 60, "quantity": 3}]
-        state.equipment = {"WEAPON": {"gePrice": 1000, "haPrice": 600, "quantity": 1}}
-        sensor = OsrsWealthSensor(entry, state, "hash1")
-        assert sensor.native_value == 300 + 1000
-
-    def test_attributes_split_and_unique_id(self):
-        entry = _make_entry()
-        state = AccountState("hash1", "Player")
-        state.inventory = [{"gePrice": 100, "haPrice": 60, "quantity": 3}]
-        sensor = OsrsWealthSensor(entry, state, "hash1")
-        attrs = sensor.extra_state_attributes
-        assert attrs["inventory_ge_value"] == 300
-        assert attrs["inventory_ha_value"] == 180
-        assert attrs["total_ge_value"] == 300
-        assert sensor.unique_id == "hash1_wealth"
-
-
 class TestOsrsLevelSensors:
-    """Tests for total level and combat level sensors."""
+    """Tests for total level and combat level sensors (derived from XP)."""
 
-    _SKILLS = {
-        "Attack": {"xp": 737627, "level": 60},
-        "Strength": {"xp": 900000, "level": 70},
-        "Defence": {"xp": 123456, "level": 50},
-        "Hitpoints": {"xp": 1234567, "level": 75},
-        "Ranged": {"xp": 500000, "level": 55},
-        "Prayer": {"xp": 200000, "level": 43},
-        "Magic": {"xp": 400000, "level": 59},
+    # All seven combat skills at exactly level 99 (13,034,431 XP each).
+    _MAXED = {
+        s: {"xp": 13_034_431}
+        for s in (
+            "Attack",
+            "Strength",
+            "Defence",
+            "Hitpoints",
+            "Ranged",
+            "Prayer",
+            "Magic",
+        )
     }
 
     def test_total_level(self):
         entry = _make_entry()
         state = AccountState("hash1", "Player")
-        state.skills = dict(self._SKILLS)
+        state.skills = dict(self._MAXED)
         sensor = OsrsTotalLevelSensor(entry, state, "hash1")
-        assert sensor.native_value == 412
+        assert sensor.native_value == 99 * 7
         assert sensor.extra_state_attributes["skill_count"] == 7
 
     def test_combat_level(self):
         entry = _make_entry()
         state = AccountState("hash1", "Player")
-        state.skills = dict(self._SKILLS)
+        state.skills = dict(self._MAXED)
         sensor = OsrsCombatLevelSensor(entry, state, "hash1")
-        assert sensor.native_value == 78
+        assert sensor.native_value == 126  # max combat
 
 
 class TestOsrsLastEventSensors:
@@ -366,12 +346,30 @@ class TestOsrsLastEventSensors:
         assert attrs["value_lost"] == 88
         assert sensor.unique_id == "hash1_last_death"
 
-    def test_last_loot_uses_source_text(self):
+    def test_last_loot_prefers_highest_value_item(self):
         entry = _make_entry()
         state = AccountState("hash1", "Player")
         state.record_game_event(
-            "LOOT", {"totalValue": 35, "source": {"text": "Goblin"}}
+            "LOOT",
+            {
+                "totalValue": 5_000_000,
+                "source": {"text": "Zulrah"},
+                "highestValueItem": {"name": "Tanzanite fang"},
+                "items": [{"name": "Snakeskin"}],
+            },
         )
         sensor = OsrsLastLootSensor(entry, state, "hash1")
-        assert sensor.native_value == "Goblin"
-        assert sensor.extra_state_attributes["total_value"] == 35
+        # The notable item, not the NPC/source.
+        assert sensor.native_value == "Tanzanite fang"
+        assert sensor.extra_state_attributes["total_value"] == 5_000_000
+        # Source is still available as an attribute.
+        assert sensor.extra_state_attributes["source"] == {"text": "Zulrah"}
+
+    def test_last_loot_falls_back_to_item_then_source(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.record_game_event(
+            "LOOT", {"items": [{"name": "Bones"}], "source": {"text": "Goblin"}}
+        )
+        sensor = OsrsLastLootSensor(entry, state, "hash1")
+        assert sensor.native_value == "Bones"
