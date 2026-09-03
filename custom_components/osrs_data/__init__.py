@@ -26,6 +26,15 @@ from .const import (
     DATA_EVENT_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
+    CONF_DEATH_LIMIT,
+    CONF_LOOT_LIMIT,
+    CONF_DEFAULT_LIMIT,
+    CONF_DEDUPE_TTL,
+    CONF_PRESENCE_TIMEOUT,
+    DEFAULT_DEATH_LIMIT,
+    DEFAULT_LOOT_LIMIT,
+    DEFAULT_HISTORY_LIMIT,
+    DEFAULT_DEDUPE_TTL,
     PAIRING_CODE_TTL,
     PRESENCE_CHECK_INTERVAL,
     PRESENCE_TIMEOUT,
@@ -54,8 +63,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OSRS Data from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    history_store = HistoryStore()
-    account_store = AccountStore()
+    # Resolve configurable options (defaults preserve prior behavior).
+    opts = entry.options
+    history_limits = {
+        "DEATH": opts.get(CONF_DEATH_LIMIT, DEFAULT_DEATH_LIMIT),
+        "LOOT": opts.get(CONF_LOOT_LIMIT, DEFAULT_LOOT_LIMIT),
+    }
+    default_limit = opts.get(CONF_DEFAULT_LIMIT, DEFAULT_HISTORY_LIMIT)
+    dedupe_ttl = opts.get(CONF_DEDUPE_TTL, DEFAULT_DEDUPE_TTL)
+    presence_timeout = opts.get(CONF_PRESENCE_TIMEOUT, PRESENCE_TIMEOUT)
+
+    history_store = HistoryStore(limits=history_limits, default_limit=default_limit)
+    account_store = AccountStore(presence_timeout=presence_timeout)
     pairing_store = PairingStore()
 
     # Restore persisted data
@@ -91,11 +110,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
-        DATA_DEDUPE_CACHE: DedupeCache(),
-        DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(),
+        DATA_DEDUPE_CACHE: DedupeCache(ttl=dedupe_ttl),
+        DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(ttl=dedupe_ttl),
         DATA_PAIRING_STORE: pairing_store,
         DATA_STORE: store,
     }
+
+    # Reload the entry when options change so new limits/TTLs take effect.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     # Register API views (guarded — may already be registered by config flow)
     if not hass.data[DOMAIN].get("_views_registered"):
@@ -155,6 +177,59 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             supports_response=SupportsResponse.OPTIONAL,
         )
 
+    async def _handle_get_history(call: ServiceCall) -> ServiceResponse:
+        """Return recent event history, newest first.
+
+        Optional filters: ``account_name`` (defaults to all accounts) and
+        ``event_type`` (defaults to every type).  ``limit`` caps the
+        number of returned entries.
+        """
+        entry_data_svc = hass.data[DOMAIN].get(entry.entry_id)
+        if entry_data_svc is None:
+            raise ValueError("Integration not configured")
+        history_store = entry_data_svc.get(DATA_HISTORY_STORE)
+        acct_store = entry_data_svc.get(DATA_ACCOUNT_STORE)
+        if history_store is None or acct_store is None:
+            return {"entries": []}
+
+        account_name = call.data.get("account_name")
+        event_type = call.data.get("event_type")
+        if event_type:
+            event_type = event_type.upper()
+        limit = call.data.get("limit", 20)
+
+        if account_name:
+            keys = [account_name]
+        else:
+            keys = [acct.player_name for acct in acct_store.accounts]
+
+        entries: list[dict] = []
+        for key in keys:
+            hist = history_store.get_or_create(key)
+            items = hist.get(event_type) if event_type else hist.all_entries()
+            for item in items:
+                entries.append({**item, "account_name": key})
+
+        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        return {"entries": entries[:limit]}
+
+    if not hass.services.has_service(DOMAIN, "get_history"):
+        hass.services.async_register(
+            DOMAIN,
+            "get_history",
+            _handle_get_history,
+            schema=vol.Schema(
+                {
+                    vol.Optional("account_name"): str,
+                    vol.Optional("event_type"): str,
+                    vol.Optional("limit", default=20): vol.All(
+                        int, vol.Range(min=1, max=500)
+                    ),
+                }
+            ),
+            supports_response=SupportsResponse.ONLY,
+        )
+
     _LOGGER.info("OSRS Data events endpoint at /api/osrs-data/events")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -198,6 +273,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when its options are updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -217,9 +297,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not isinstance(k, str) or not k.startswith("_")
         }
         if not remaining:
-            # Unregister the service
+            # Unregister the services
             if hass.services.has_service(DOMAIN, "create_pairing_code"):
                 hass.services.async_remove(DOMAIN, "create_pairing_code")
+            if hass.services.has_service(DOMAIN, "get_history"):
+                hass.services.async_remove(DOMAIN, "get_history")
             # Clear all domain-level flags so views re-register on next setup
             hass.data.pop(DOMAIN, None)
             _LOGGER.debug("All OSRS Data entries removed — domain state cleaned up")

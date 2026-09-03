@@ -8,7 +8,22 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from .const import DOMAIN, CONF_TITLE, PAIRING_CODE_TTL, DATA_PAIRING_STORE
+from .const import (
+    DOMAIN,
+    CONF_TITLE,
+    PAIRING_CODE_TTL,
+    DATA_PAIRING_STORE,
+    CONF_DEATH_LIMIT,
+    CONF_LOOT_LIMIT,
+    CONF_DEFAULT_LIMIT,
+    CONF_DEDUPE_TTL,
+    CONF_PRESENCE_TIMEOUT,
+    DEFAULT_DEATH_LIMIT,
+    DEFAULT_LOOT_LIMIT,
+    DEFAULT_HISTORY_LIMIT,
+    DEFAULT_DEDUPE_TTL,
+    PRESENCE_TIMEOUT,
+)
 from .pairing import _generate_pairing_code
 
 _LOGGER = logging.getLogger(__name__)
@@ -127,7 +142,7 @@ class OsrsDataConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OsrsDataOptionsFlow(config_entries.OptionsFlow):
-    """Options flow — pair additional RuneLite clients."""
+    """Options flow — pair additional clients or edit integration settings."""
 
     def __init__(self) -> None:
         """Initialize options flow."""
@@ -135,6 +150,13 @@ class OsrsDataOptionsFlow(config_entries.OptionsFlow):
         self._pairing_code: str | None = None
 
     async def async_step_init(self, user_input=None):
+        """Present a menu: pair a new client, or edit settings."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["pair_client", "settings"],
+        )
+
+    async def async_step_pair_client(self, user_input=None):
         """Ask for a device name for the new client."""
         if user_input is not None:
             self._device_name = user_input.get("device_name", "RuneLite Client")
@@ -143,7 +165,39 @@ class OsrsDataOptionsFlow(config_entries.OptionsFlow):
         schema = vol.Schema({
             vol.Optional("device_name", default="RuneLite Client"): str,
         })
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="pair_client", data_schema=schema)
+
+    async def async_step_settings(self, user_input=None):
+        """Edit configurable integration settings (stored in entry.options)."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        opts = self.config_entry.options
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_DEATH_LIMIT,
+                    default=opts.get(CONF_DEATH_LIMIT, DEFAULT_DEATH_LIMIT),
+                ): vol.All(int, vol.Range(min=1, max=1000)),
+                vol.Optional(
+                    CONF_LOOT_LIMIT,
+                    default=opts.get(CONF_LOOT_LIMIT, DEFAULT_LOOT_LIMIT),
+                ): vol.All(int, vol.Range(min=1, max=1000)),
+                vol.Optional(
+                    CONF_DEFAULT_LIMIT,
+                    default=opts.get(CONF_DEFAULT_LIMIT, DEFAULT_HISTORY_LIMIT),
+                ): vol.All(int, vol.Range(min=1, max=1000)),
+                vol.Optional(
+                    CONF_DEDUPE_TTL,
+                    default=opts.get(CONF_DEDUPE_TTL, DEFAULT_DEDUPE_TTL),
+                ): vol.All(int, vol.Range(min=0, max=600)),
+                vol.Optional(
+                    CONF_PRESENCE_TIMEOUT,
+                    default=opts.get(CONF_PRESENCE_TIMEOUT, PRESENCE_TIMEOUT),
+                ): vol.All(int, vol.Range(min=30, max=86400)),
+            }
+        )
+        return self.async_show_form(step_id="settings", data_schema=schema)
 
     async def async_step_pair_code(self, user_input=None):
         """Show the pairing code."""

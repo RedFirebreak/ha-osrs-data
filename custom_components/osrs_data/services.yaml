@@ -1,7 +1,7 @@
 create_pairing_code:
   name: Create pairing code
   description: >-
-    Generate a 6-digit one-time pairing code for a RuneLite client.
+    Generate a 5-digit one-time pairing code for a RuneLite client.
     The code is valid for 5 minutes. A persistent notification will
     appear in Home Assistant showing the code.
   fields:
@@ -13,3 +13,45 @@ create_pairing_code:
       example: "Desktop RuneLite"
       selector:
         text:
+
+get_history:
+  name: Get event history
+  description: >-
+    Return recent game events (deaths, loot, level-ups, etc.) from the
+    persistent history buffers, newest first. Returns a response with an
+    "entries" list.
+  fields:
+    account_name:
+      name: Account name
+      description: Limit results to a single player. Leave empty for all accounts.
+      required: false
+      example: "Zezima"
+      selector:
+        text:
+    event_type:
+      name: Event type
+      description: Limit results to one event type (e.g. DEATH, LOOT). Leave empty for all types.
+      required: false
+      example: "DEATH"
+      selector:
+        select:
+          custom_value: true
+          options:
+            - "DEATH"
+            - "LOOT"
+            - "PKLOOT"
+            - "LEVELUP"
+            - "SUPERIORSPAWN"
+            - "ACHIEVEMENTDIARY"
+            - "COMBATTASK"
+    limit:
+      name: Limit
+      description: Maximum number of entries to return.
+      required: false
+      default: 20
+      example: 20
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box

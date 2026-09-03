@@ -1,0 +1,86 @@
+# OSRS Data — example dashboard view
+#
+# Paste this under a Lovelace dashboard in YAML mode, or add it as a new
+# view. Replace "myrsn" in every entity_id with the slug of your account
+# (the OSRS Data integration creates entities as
+# sensor.osrs_<account>_<name> — check Developer Tools → States).
+#
+# This view showcases the sensors added by the integration, including the
+# Wealth, Total Level, Combat Level, Last Death and Last Loot sensors.
+
+title: OSRS
+path: osrs
+icon: mdi:sword
+cards:
+  - type: entities
+    title: Overview
+    entities:
+      - entity: sensor.osrs_myrsn_player_info
+        name: Player
+      - entity: binary_sensor.osrs_myrsn_online
+        name: Online
+      - entity: sensor.osrs_myrsn_game_state
+        name: Game state
+      - type: attribute
+        entity: sensor.osrs_myrsn_player_info
+        attribute: world
+        name: World
+
+  - type: glance
+    title: Vitals & progression
+    columns: 3
+    entities:
+      - entity: sensor.osrs_myrsn_health
+        name: HP
+      - entity: sensor.osrs_myrsn_prayer_points
+        name: Prayer
+      - entity: sensor.osrs_myrsn_combat_level
+        name: Combat
+      - entity: sensor.osrs_myrsn_total_level
+        name: Total level
+      - entity: sensor.osrs_myrsn_wealth
+        name: Wealth (gp)
+      - entity: sensor.osrs_myrsn_location
+        name: Location
+
+  - type: entities
+    title: Last death
+    entities:
+      - entity: sensor.osrs_myrsn_last_death
+        name: Killed by
+        secondary_info: last-changed
+    footer:
+      type: attribute
+      entity: sensor.osrs_myrsn_last_death
+      attribute: value_lost
+      prefix: "Value lost: "
+      suffix: " gp"
+
+  - type: entities
+    title: Last loot
+    entities:
+      - entity: sensor.osrs_myrsn_last_loot
+        name: Source
+        secondary_info: last-changed
+    footer:
+      type: attribute
+      entity: sensor.osrs_myrsn_last_loot
+      attribute: total_value
+      prefix: "Total value: "
+      suffix: " gp"
+
+  # A markdown card that renders the "recent" history attribute the
+  # Last Death / Last Loot sensors expose (last 10 entries each).
+  - type: markdown
+    title: Recent loot
+    content: |
+      {% set recent = state_attr('sensor.osrs_myrsn_last_loot', 'recent') or [] %}
+      {% if recent | length == 0 %}
+      _No loot recorded yet._
+      {% else %}
+      | When | Source | Value |
+      |------|--------|-------|
+      {% for e in recent -%}
+      | {{ as_timestamp(e.timestamp) | timestamp_custom('%H:%M') }} | {{ e.data.source.text | default('?') }} | {{ e.data.totalValue | default(0) }} gp |
+      {% endfor %}
+      {% endif %}

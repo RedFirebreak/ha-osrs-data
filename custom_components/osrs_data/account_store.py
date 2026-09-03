@@ -22,11 +22,19 @@ def _normalize_player_name(name: str) -> str:
 class AccountState:
     """Per-account player state and detail sensors."""
 
-    def __init__(self, account_hash: str, player_name: str) -> None:
+    def __init__(
+        self,
+        account_hash: str,
+        player_name: str,
+        presence_timeout: float = PRESENCE_TIMEOUT,
+    ) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
         self.account_type: str | None = None
         self.world: str | None = None
+
+        # Fallback presence timeout (seconds) used when no tickDelay known.
+        self._presence_timeout_fallback: float = presence_timeout
 
         # Skills: {skill_name: {"xp": ..., "level": ...}}
         self.skills: dict[str, dict[str, Any]] = {}
@@ -70,6 +78,10 @@ class AccountState:
 
         # Event totals: {event_type: {"count": int, "last_fired": iso_str}}
         self.event_totals: dict[str, dict[str, Any]] = {}
+
+        # Most recent rich event payloads (data + timestamp), empty until seen
+        self.last_death: dict[str, Any] = {}
+        self.last_loot: dict[str, Any] = {}
 
     def update_player_data(
         self,
@@ -163,6 +175,71 @@ class AccountState:
             entry["count"] = entry.get("count", 0) + 1
             entry["last_fired"] = now
 
+    def record_game_event(self, event_type: str, data: dict[str, Any]) -> None:
+        """Record a game event: bump its counter and stash the rich payload.
+
+        DEATH/LOOT/PKLOOT payloads are stored (with a timestamp) so the
+        corresponding "Last …" sensors can surface killer, value lost,
+        loot total, etc.  All event types still bump the counter.
+        """
+        self.record_event(event_type)
+        if not isinstance(data, dict):
+            return
+        stamped = {**data, "timestamp": datetime.now(timezone.utc).isoformat()}
+        if event_type == "DEATH":
+            self.last_death = stamped
+        elif event_type in ("LOOT", "PKLOOT"):
+            self.last_loot = stamped
+
+    # ── Computed aggregates ─────────────────────────────────────────
+
+    @staticmethod
+    def _item_value(item: dict[str, Any], price_key: str) -> int:
+        """Value of a single item = unit price × quantity (0 if missing)."""
+        if not isinstance(item, dict):
+            return 0
+        return int(item.get(price_key, 0) or 0) * int(item.get("quantity", 0) or 0)
+
+    def inventory_value(self, price_key: str = "gePrice") -> int:
+        """Total value of the inventory for *price_key* (gePrice/haPrice)."""
+        return sum(self._item_value(item, price_key) for item in self.inventory)
+
+    def equipment_value(self, price_key: str = "gePrice") -> int:
+        """Total value of worn equipment for *price_key* (gePrice/haPrice)."""
+        return sum(
+            self._item_value(item, price_key)
+            for item in self.equipment.values()
+            if item
+        )
+
+    @property
+    def total_level(self) -> int:
+        """Sum of all skill levels."""
+        return sum(skill.get("level", 0) for skill in self.skills.values())
+
+    @property
+    def total_xp(self) -> int:
+        """Sum of all skill XP."""
+        return sum(skill.get("xp", 0) for skill in self.skills.values())
+
+    @property
+    def combat_level(self) -> int | None:
+        """OSRS combat level from combat skill levels.
+
+        Returns ``None`` until the combat skills have been received.
+        """
+        if not self.skills:
+            return None
+
+        def lvl(name: str) -> int:
+            return self.skills.get(name, {}).get("level", 1)
+
+        base = 0.25 * (lvl("Defence") + lvl("Hitpoints") + math.floor(lvl("Prayer") / 2))
+        melee = 0.325 * (lvl("Attack") + lvl("Strength"))
+        ranged = 0.325 * math.floor(lvl("Ranged") * 3 / 2)
+        magic = 0.325 * math.floor(lvl("Magic") * 3 / 2)
+        return math.floor(base + max(melee, ranged, magic))
+
     @property
     def presence_timeout(self) -> float:
         """Compute the presence timeout in seconds.
@@ -175,7 +252,7 @@ class AccountState:
             return math.floor(
                 self.tick_delay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION
             )
-        return PRESENCE_TIMEOUT
+        return self._presence_timeout_fallback
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
@@ -200,6 +277,8 @@ class AccountState:
             "offline_reason": self.offline_reason,
             "tick_delay": self.tick_delay,
             "event_totals": self.event_totals,
+            "last_death": self.last_death,
+            "last_loot": self.last_loot,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -227,14 +306,17 @@ class AccountState:
         self.offline_reason = data.get("offline_reason")
         self.tick_delay = data.get("tick_delay")
         self.event_totals = data.get("event_totals", {})
+        self.last_death = data.get("last_death", {})
+        self.last_loot = data.get("last_loot", {})
 
 
 class AccountStore:
     """In-memory store keyed by account identifier (fallback: playerName)."""
 
-    def __init__(self) -> None:
+    def __init__(self, presence_timeout: float = PRESENCE_TIMEOUT) -> None:
         self._by_hash: dict[str, AccountState] = {}
         self._by_name: dict[str, AccountState] = {}
+        self._presence_timeout = presence_timeout
 
     def get_or_create(
         self, account_hash: str | None, player_name: str
@@ -256,7 +338,11 @@ class AccountStore:
 
         # Brand-new account
         key = account_hash or norm
-        state = AccountState(account_hash=key, player_name=player_name)
+        state = AccountState(
+            account_hash=key,
+            player_name=player_name,
+            presence_timeout=self._presence_timeout,
+        )
         if account_hash:
             self._by_hash[account_hash] = state
         self._by_name[norm] = state

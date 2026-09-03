@@ -17,6 +17,14 @@
   "options": {
     "step": {
       "init": {
+        "title": "OSRS Data Options",
+        "description": "Choose what you'd like to do.",
+        "menu_options": {
+          "pair_client": "Pair a new RuneLite client",
+          "settings": "Edit integration settings"
+        }
+      },
+      "pair_client": {
         "title": "Pair New RuneLite Client",
         "description": "Enter a name for the new RuneLite client.",
         "data": {
@@ -26,17 +34,46 @@
       "pair_code": {
         "title": "Pairing Code",
         "description": "Enter this code in your RuneLite plugin:\n\n## {code}\n\nThe code expires in {ttl_minutes} minutes. Click **Submit** when done."
+      },
+      "settings": {
+        "title": "Integration Settings",
+        "description": "Tune history retention, deduplication, and presence detection. Changes take effect immediately (the integration reloads).",
+        "data": {
+          "death_limit": "Death history entries kept",
+          "loot_limit": "Loot history entries kept",
+          "default_limit": "Default history entries kept (other event types)",
+          "dedupe_ttl": "Deduplication window (seconds)",
+          "presence_timeout": "Presence timeout fallback (seconds)"
+        }
       }
     }
   },
   "services": {
     "create_pairing_code": {
       "name": "Create pairing code",
-      "description": "Generate a 6-digit one-time pairing code for a RuneLite client. The code expires after 5 minutes.",
+      "description": "Generate a 5-digit one-time pairing code for a RuneLite client. The code expires after 5 minutes.",
       "fields": {
         "device_name": {
           "name": "Device name",
           "description": "A friendly name for the RuneLite client being paired."
+        }
+      }
+    },
+    "get_history": {
+      "name": "Get event history",
+      "description": "Return recent game events (deaths, loot, level-ups, etc.) from the persistent history buffers, newest first.",
+      "fields": {
+        "account_name": {
+          "name": "Account name",
+          "description": "Limit results to a single player. Leave empty for all accounts."
+        },
+        "event_type": {
+          "name": "Event type",
+          "description": "Limit results to one event type (e.g. DEATH, LOOT). Leave empty for all types."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of entries to return."
         }
       }
     }

@@ -6,15 +6,23 @@ import logging
 import re
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .account_store import AccountState
-from .const import DOMAIN, DATA_ACCOUNT_STORE, SIGNAL_ACCOUNT_UPDATED
+from .const import (
+    DOMAIN,
+    DATA_ACCOUNT_STORE,
+    DATA_HISTORY_STORE,
+    SIGNAL_ACCOUNT_UPDATED,
+)
 from .parser.base import EQUIPMENT_SLOTS
+
+# Number of recent history entries surfaced on the "Last …" sensors.
+_RECENT_HISTORY_LIMIT = 10
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +71,11 @@ async def async_setup_entry(
             new_entities.append(OsrsLocationSensor(entry, state, slug))
             new_entities.append(OsrsSpellbookSensor(entry, state, slug))
             new_entities.append(OsrsGameStateSensor(entry, state, slug))
+            new_entities.append(OsrsWealthSensor(entry, state, slug))
+            new_entities.append(OsrsTotalLevelSensor(entry, state, slug))
+            new_entities.append(OsrsCombatLevelSensor(entry, state, slug))
+            new_entities.append(OsrsLastDeathSensor(entry, state, slug))
+            new_entities.append(OsrsLastLootSensor(entry, state, slug))
 
         # Create detail sensors for any new keys (skill xp & level)
         for key in state.detail_sensors:
@@ -525,6 +538,313 @@ class OsrsGameStateSensor(SensorEntity):
         attrs: dict[str, Any] = {}
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Wealth sensor ───────────────────────────────────────────────────
+
+
+class OsrsWealthSensor(SensorEntity):
+    """Total GE/HA value of the player's inventory and worn equipment."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Wealth"
+    _attr_native_unit_of_measurement = "gp"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_wealth"
+
+    @property
+    def native_value(self) -> int:
+        """Combined GE value of inventory + equipment."""
+        return self._state.inventory_value("gePrice") + self._state.equipment_value(
+            "gePrice"
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        inv_ge = self._state.inventory_value("gePrice")
+        eq_ge = self._state.equipment_value("gePrice")
+        inv_ha = self._state.inventory_value("haPrice")
+        eq_ha = self._state.equipment_value("haPrice")
+        attrs: dict[str, Any] = {
+            "inventory_ge_value": inv_ge,
+            "equipment_ge_value": eq_ge,
+            "inventory_ha_value": inv_ha,
+            "equipment_ha_value": eq_ha,
+            "total_ge_value": inv_ge + eq_ge,
+            "total_ha_value": inv_ha + eq_ha,
+        }
+        if self._state.last_update:
+            attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Total Level sensor ──────────────────────────────────────────────
+
+
+class OsrsTotalLevelSensor(SensorEntity):
+    """Sum of all skill levels; total XP in an attribute."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Total Level"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_total_level"
+
+    @property
+    def native_value(self) -> int:
+        return self._state.total_level
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {
+            "total_xp": self._state.total_xp,
+            "skill_count": len(self._state.skills),
+        }
+        if self._state.last_update:
+            attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Combat Level sensor ─────────────────────────────────────────────
+
+
+class OsrsCombatLevelSensor(SensorEntity):
+    """OSRS combat level computed from combat skill levels."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Combat Level"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_combat_level"
+
+    @property
+    def native_value(self) -> int | None:
+        return self._state.combat_level
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {}
+        if self._state.last_update:
+            attrs["last_update"] = self._state.last_update
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+# ── Last Death / Last Loot sensors ──────────────────────────────────
+
+
+def _recent_history(
+    sensor: SensorEntity, account_key: str, event_type: str
+) -> list[dict[str, Any]]:
+    """Return the most recent history entries for an account + event type."""
+    hass = getattr(sensor, "hass", None)
+    if hass is None:
+        return []
+    entry_data = hass.data.get(DOMAIN, {}).get(sensor._entry.entry_id)  # type: ignore[attr-defined]
+    if not isinstance(entry_data, dict):
+        return []
+    history_store = entry_data.get(DATA_HISTORY_STORE)
+    if history_store is None:
+        return []
+    entries = history_store.get_or_create(account_key).get(event_type)
+    return list(reversed(entries[-_RECENT_HISTORY_LIMIT:]))
+
+
+class OsrsLastDeathSensor(SensorEntity):
+    """Details of the player's most recent death."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last Death"
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_last_death"
+
+    @property
+    def native_value(self) -> str | None:
+        death = self._state.last_death
+        if not death:
+            return None
+        return death.get("killerName") or "Unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        death = self._state.last_death
+        attrs: dict[str, Any] = {}
+        if death:
+            attrs.update(
+                {
+                    "value_lost": death.get("valueLost", 0),
+                    "danger": death.get("danger"),
+                    "killer_name": death.get("killerName"),
+                    "killer_npc_id": death.get("killerNpcId"),
+                    "kept_items": death.get("keptItems", []),
+                    "lost_items": death.get("lostItems", []),
+                    "location": death.get("location"),
+                    "timestamp": death.get("timestamp"),
+                }
+            )
+        attrs["recent"] = _recent_history(self, self._state.player_name, "DEATH")
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+class OsrsLastLootSensor(SensorEntity):
+    """Details of the player's most recent loot drop."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last Loot"
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_last_loot"
+
+    @property
+    def native_value(self) -> str | None:
+        loot = self._state.last_loot
+        if not loot:
+            return None
+        source = loot.get("source")
+        if isinstance(source, dict) and source.get("text"):
+            return source["text"]
+        highest = loot.get("highestValueItem")
+        if isinstance(highest, dict) and highest.get("name"):
+            return highest["name"]
+        return "Loot"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        loot = self._state.last_loot
+        attrs: dict[str, Any] = {}
+        if loot:
+            attrs.update(
+                {
+                    "total_value": loot.get("totalValue", 0),
+                    "highest_value_item": loot.get("highestValueItem"),
+                    "items": loot.get("items", []),
+                    "source": loot.get("source"),
+                    "type": loot.get("type"),
+                    "npc_id": loot.get("npcId"),
+                    "timestamp": loot.get("timestamp"),
+                }
+            )
+        attrs["recent"] = _recent_history(self, self._state.player_name, "LOOT")
         return attrs
 
     @property

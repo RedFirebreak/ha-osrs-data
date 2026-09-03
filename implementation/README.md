@@ -1,6 +1,6 @@
 # Implementation Examples
 
-Ready-to-use Home Assistant blueprints and scripts for the [OSRS Data](../README.md) integration.
+Ready-to-use Home Assistant blueprints, scripts, and dashboards for the [OSRS Data](../README.md) integration.
 
 ## Contents
 
@@ -10,12 +10,21 @@ Ready-to-use Home Assistant blueprints and scripts for the [OSRS Data](../README
 |------|------|-------------|
 | `blueprints/flash-lights-on-event.yaml` | Flash lights on event | Flashes selected lights when an OSRS event fires. Supports custom flash color, brightness, flash count, and transition speed. Automatically restores previous light states after flashing. |
 | `blueprints/wave-lights-on-event.yaml` | Wave lights on event | Staggers light flashes one-by-one across multiple lights for a chase/wave effect. Each light runs its own independent blink cycle, offset by a configurable delay. Requires the helper script below. |
+| `blueprints/notify-on-event.yaml` | Notify on event | Sends a notification when a chosen OSRS event fires. Title and message are templates with full access to `trigger.event.data`. |
+| `blueprints/valuable-loot-notify.yaml` | Notify on valuable loot | Notifies when a `LOOT`/`PKLOOT` event's `totalValue` meets or exceeds a configurable threshold. |
+| `blueprints/low-hp-alert.yaml` | Low HP alert | Notifies (and optionally turns a light red) when a player's **Health** sensor drops to or below a threshold. |
 
 ### Scripts
 
 | File | Name | Description |
 |------|------|-------------|
 | `scripts/osrs-flash-single-light.yaml` | Flash single light | Helper script used by the **wave** blueprint. Runs a dim↔bright blink cycle on a single light. Runs in parallel mode so the wave blueprint can call it once per light concurrently. |
+
+### Dashboards
+
+| File | Name | Description |
+|------|------|-------------|
+| `dashboards/osrs-overview.yaml` | OSRS overview | Example Lovelace view: player status, vitals, wealth, combat/total level, and recent deaths/loot. Replace `myrsn` in the entity IDs with your account slug. |
 
 ## Installation
 
@@ -48,7 +57,7 @@ The **wave** blueprint requires the `osrs_flash_single_light` helper script. Ins
 
 ## Blueprint Options
 
-Both blueprints share the following configurable inputs:
+The two **light** blueprints (flash and wave) share the following configurable inputs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
