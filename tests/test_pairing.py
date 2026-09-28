@@ -50,7 +50,7 @@ class TestGeneratePairingCode:
 
     def test_codes_are_unique(self):
         codes = {_generate_pairing_code() for _ in range(100)}
-        # 100 random 6-digit codes: collisions are possible but very rare
+        # 100 random 5-digit codes: collisions are possible but rare
         assert len(codes) >= 90
 
 

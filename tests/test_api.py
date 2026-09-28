@@ -1081,3 +1081,64 @@ class TestFilteredSections:
         acct = store.get_or_create(None, "PlayerOne")
         assert acct.inventory == []
         assert "inventory" in acct.received_sections
+
+
+class TestPairRateLimit:
+    """/api/osrs-data/pair needs no auth, so failed codes are limited per IP."""
+
+    IP = "203.0.113.7"
+
+    def _request(self, hass, code, ip=IP):
+        request = _make_json_request(hass, {"code": code})
+        request.remote = ip
+        return request
+
+    async def _fail(self, hass, view, times, ip=IP):
+        for _ in range(times):
+            assert (await view.post(self._request(hass, "00000", ip))).status == 403
+
+    @pytest.mark.asyncio
+    async def test_eleventh_attempt_after_ten_failures_is_limited(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        await self._fail(hass, view, 10)
+
+        # Even a valid code is refused while the IP is limited.
+        code = pairing_store.create_pairing_code()
+        result = await view.post(self._request(hass, code))
+
+        assert result.status == 429
+        body = json.loads(result.body)
+        assert body["ok"] is False
+        assert "Too many pairing attempts" in body["error"]
+        assert 0 < int(result.headers["Retry-After"]) <= 600
+
+    @pytest.mark.asyncio
+    async def test_other_ip_is_not_limited(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        await self._fail(hass, view, 10)
+        code = pairing_store.create_pairing_code()
+        result = await view.post(self._request(hass, code, ip="198.51.100.1"))
+        assert result.status == 200
+
+    @pytest.mark.asyncio
+    async def test_successful_pairings_are_not_counted(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        for _ in range(12):
+            code = pairing_store.create_pairing_code()
+            assert (await view.post(self._request(hass, code))).status == 200
+
+    @pytest.mark.asyncio
+    async def test_limit_expires_after_window(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        clock = [1_000.0]
+        with patch("custom_components.osrs_data.pairing.time.monotonic", lambda: clock[0]):
+            await self._fail(hass, view, 10)
+            clock[0] += 599
+            assert (await view.post(self._request(hass, "00000"))).status == 429
+            clock[0] += 2
+            code = pairing_store.create_pairing_code()
+            assert (await view.post(self._request(hass, code))).status == 200

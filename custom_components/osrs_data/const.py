@@ -24,6 +24,10 @@ SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
 PAIRING_CODE_LENGTH = 5
 PAIRING_CODE_TTL = 300  # seconds (5 minutes)
 DEVICE_TOKEN_LENGTH = 64  # hex characters
+# The pair endpoint needs no auth: limit failed attempts per client IP.
+PAIR_MAX_FAILED_ATTEMPTS = 10
+PAIR_ATTEMPT_WINDOW = 600  # seconds (10 minutes)
+DATA_PAIR_LIMITER = "_pair_limiter"  # hass.data[DOMAIN] key
 
 # Presence / online detection
 PRESENCE_TIMEOUT = 1500  # seconds (25 minutes) — fallback when no tickDelay known

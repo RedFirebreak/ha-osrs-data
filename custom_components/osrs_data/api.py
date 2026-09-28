@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,11 +27,13 @@ from .const import (
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
     DATA_EVENT_DEDUPE_CACHE,
+    DATA_PAIR_LIMITER,
     DATA_PAIRING_STORE,
     DATA_STORE,
     PAIRING_CODE_TTL,
     SIGNAL_ACCOUNT_UPDATED,
 )
+from .pairing import PairAttemptLimiter
 from .parser.base import parse as parse_player_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -209,7 +212,41 @@ class OsrsPairView(HomeAssistantView):
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
-        """Consume a pairing code and issue a device token."""
+        """Consume a pairing code and issue a device token.
+
+        The endpoint needs no auth, so failed attempts (400/403) are
+        limited per client IP; a limited client gets a 429 with
+        Retry-After, even for a valid code.
+        """
+        hass: HomeAssistant = request.app["hass"]
+        limiter = hass.data.setdefault(DOMAIN, {}).setdefault(
+            DATA_PAIR_LIMITER, PairAttemptLimiter()
+        )
+        client = request.remote or "unknown"
+        retry_after = limiter.retry_after(client)
+        if retry_after is not None:
+            minutes = math.ceil(retry_after / 60)
+            return self.json(
+                {
+                    "ok": False,
+                    "error": (
+                        "Too many pairing attempts. Try again in "
+                        f"{minutes} minute{'s' if minutes != 1 else ''}."
+                    ),
+                },
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        response = await self._pair(request, hass)
+        if response.status in (400, 403):
+            limiter.record_failure(client)
+            if limiter.retry_after(client) is not None:
+                _LOGGER.warning("Too many failed pairing attempts from %s", client)
+        return response
+
+    async def _pair(self, request: web.Request, hass: HomeAssistant) -> web.Response:
+        """Validate the request body and consume its pairing code."""
         try:
             body = await request.json()
         except (json.JSONDecodeError, ValueError):
@@ -220,7 +257,6 @@ class OsrsPairView(HomeAssistantView):
         if not code:
             return self.json({"ok": False, "error": "Missing pairing code"}, status_code=400)
 
-        hass: HomeAssistant = request.app["hass"]
         version = _plugin_version(request)
 
         # 1. Try per-entry pairing stores first (the common path)
