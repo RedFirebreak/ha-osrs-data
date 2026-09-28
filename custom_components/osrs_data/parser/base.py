@@ -122,6 +122,12 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     events = payload.get("events") or player.get("events", [])
     if not isinstance(events, list):
         events = []
+    # Only well-formed events (an object with a string ``type``) survive,
+    # so one malformed entry can't break processing of the others.
+    events = [
+        ev for ev in events
+        if isinstance(ev, dict) and isinstance(ev.get("type"), str)
+    ]
 
     # ── Tick delay (root-level) ──────────────────────────────────────
     # Number of game ticks between plugin data messages.  Used to

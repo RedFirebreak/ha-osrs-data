@@ -328,3 +328,41 @@ class TestRegisterDevice:
         store2 = PairingStore()
         store2.load_dict(data)
         assert store2.validate_token("tok_rt") == "dev_rt"
+
+
+class TestTouchDevice:
+    """Plugin version / last-seen tracking (HA Exporter #31 header)."""
+
+    def _paired(self):
+        store = PairingStore()
+        result = store.consume_pairing_code(store.create_pairing_code("Desktop"))
+        return store, result["device_id"]
+
+    def test_version_change_reported(self):
+        store, device_id = self._paired()
+        assert store.touch_device(device_id, "1.4") is True
+        assert store.touch_device(device_id, "1.4") is False
+        assert store.touch_device(device_id, "1.5") is True
+        device = store.list_devices()[0]
+        assert device["plugin_version"] == "1.5"
+        assert device["last_seen"] is not None
+
+    def test_missing_version_keeps_previous(self):
+        store, device_id = self._paired()
+        store.touch_device(device_id, "1.4")
+        assert store.touch_device(device_id, None) is False
+        assert store.list_devices()[0]["plugin_version"] == "1.4"
+
+    def test_unknown_device(self):
+        assert PairingStore().touch_device("nope", "1.4") is False
+
+    def test_persistence_roundtrip_and_legacy_load(self):
+        store, device_id = self._paired()
+        store.touch_device(device_id, "1.4")
+        restored = PairingStore()
+        restored.load_dict(store.to_dict())
+        assert restored.list_devices()[0]["plugin_version"] == "1.4"
+
+        legacy = PairedDevice.from_dict({"device_id": "d", "token_hash": "h"})
+        assert legacy.plugin_version is None
+        assert legacy.last_seen is None

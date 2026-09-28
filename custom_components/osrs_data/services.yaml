@@ -44,6 +44,7 @@ get_history:
             - "SUPERIORSPAWN"
             - "ACHIEVEMENTDIARY"
             - "COMBATTASK"
+            - "COLLECTIONLOG"
     limit:
       name: Limit
       description: Maximum number of entries to return.

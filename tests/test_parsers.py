@@ -324,6 +324,29 @@ class TestEventsParsing:
 # ── tickDelay parsing ───────────────────────────────────────────────
 
 
+class TestPluginCompatParsing:
+    """HA Exporter #29/#33 widened values to long; #35+ events must pass through."""
+
+    def test_large_values_intact(self):
+        payload = {
+            "player": {
+                "name": "P",
+                "inventory": {"items": [{"name": "Twisted bow", "gePrice": 3_000_000_000, "quantity": 1}]},
+            },
+            "events": [{"type": "death", "data": {"valueLost": 3_000_000_000}}],
+        }
+        result = parse(payload)
+        assert result["inventory"][0]["gePrice"] == 3_000_000_000
+        assert result["events"][0]["data"]["valueLost"] == 3_000_000_000
+
+    def test_malformed_events_dropped(self):
+        payload = {
+            "player": {"name": "P"},
+            "events": ["junk", {"data": {}}, {"type": 5}, {"type": "collectionLog", "data": {}}],
+        }
+        assert parse(payload)["events"] == [{"type": "collectionLog", "data": {}}]
+
+
 class TestTickDelayParsing:
     def test_tick_delay_present(self):
         result = parse({"player": {"name": "P"}, "tickDelay": 20})

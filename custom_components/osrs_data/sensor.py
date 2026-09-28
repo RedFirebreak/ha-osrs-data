@@ -75,6 +75,7 @@ async def async_setup_entry(
             new_entities.append(OsrsCombatLevelSensor(entry, state, slug))
             new_entities.append(OsrsLastDeathSensor(entry, state, slug))
             new_entities.append(OsrsLastLootSensor(entry, state, slug))
+            new_entities.append(OsrsLastCollectionLogSensor(entry, state, slug))
 
         # Create detail sensors for any new keys (skill xp & level)
         for key in state.detail_sensors:
@@ -137,13 +138,17 @@ class OsrsStatusSensor(SensorEntity):
 
 def _account_device_info(entry: ConfigEntry, state: AccountState) -> dict[str, Any]:
     """Build device_info for a per-account device."""
-    return {
+    info: dict[str, Any] = {
         "identifiers": {(DOMAIN, state.account_hash)},
         "name": f"OSRS {state.player_name}",
         "manufacturer": "RuneLite",
         "model": "OSRS Account",
         "via_device": (DOMAIN, entry.entry_id),
     }
+    if state.plugin_version:
+        # HA Exporter plugin version (X-Osrs-Exporter-Version header)
+        info["sw_version"] = state.plugin_version
+    return info
 
 
 # ── Player info sensor ──────────────────────────────────────────────
@@ -182,6 +187,8 @@ class OsrsPlayerInfoSensor(SensorEntity):
             attrs["world_types"] = self._state.world_types
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
+        if self._state.plugin_version:
+            attrs["plugin_version"] = self._state.plugin_version
         if self._state.events:
             attrs["events"] = self._state.events
         return attrs
@@ -791,6 +798,64 @@ class OsrsLastLootSensor(SensorEntity):
                 }
             )
         attrs["recent"] = _recent_history(self, self._state.player_name, "LOOT")
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return _account_device_info(self._entry, self._state)
+
+    @callback
+    def _handle_update(self, account_hash: str) -> None:
+        if account_hash == self._state.account_hash:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_ACCOUNT_UPDATED, self._handle_update
+            )
+        )
+
+
+class OsrsLastCollectionLogSensor(SensorEntity):
+    """The player's most recent new collection log item."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last Collection Log"
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        state: AccountState,
+        slug: str,
+    ) -> None:
+        self._entry = entry
+        self._state = state
+        self._attr_unique_id = f"{state.account_hash}_last_collection_log"
+
+    @property
+    def native_value(self) -> str | None:
+        item = self._state.last_collection_log
+        if not item:
+            return None
+        return item.get("itemName") or "Unknown item"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        item = self._state.last_collection_log
+        attrs: dict[str, Any] = {}
+        if item:
+            item_id = item.get("itemId")
+            attrs.update(
+                {
+                    # The plugin sends -1 when the name can't be matched
+                    "item_id": item_id if isinstance(item_id, int) and item_id >= 0 else None,
+                    "value": item.get("value", 0),
+                    "kill_count": item.get("killCount"),
+                    "timestamp": item.get("timestamp"),
+                }
+            )
+        attrs["recent"] = _recent_history(self, self._state.player_name, "COLLECTIONLOG")
         return attrs
 
     @property

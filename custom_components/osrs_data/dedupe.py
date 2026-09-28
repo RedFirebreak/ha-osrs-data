@@ -11,6 +11,11 @@ from typing import Any
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TTL = 30  # seconds
+# Plugin retry queue keeps payloads up to 10 min; keep ids a bit longer.
+DEFAULT_ID_TTL = 900  # seconds
+
+_ID_PREFIX = "id:"
+_SIG_PREFIX = "sig:"
 
 
 def _build_signature(
@@ -59,10 +64,16 @@ class EventDedupeCache:
     (legacy) field it is used directly as the dedup key.  Otherwise a
     composite signature is built from the account name, event type, and
     event data.
+
+    Id-keyed entries are kept for ``id_ttl`` seconds: the plugin queues
+    and resends events for up to 10 minutes while an endpoint is backing
+    off, and a unique id can never be a legitimate repeat.  Signature keys
+    keep the short ``ttl`` because identical events can genuinely repeat.
     """
 
-    def __init__(self, ttl: int = DEFAULT_TTL) -> None:
+    def __init__(self, ttl: int = DEFAULT_TTL, id_ttl: int = DEFAULT_ID_TTL) -> None:
         self._ttl = ttl
+        self._id_ttl = max(id_ttl, ttl)
         self._seen: dict[str, float] = {}
 
     def is_duplicate(
@@ -75,7 +86,7 @@ class EventDedupeCache:
         key = self._event_key(account_name, event)
         now = time.monotonic()
         if key in self._seen:
-            _LOGGER.debug("Duplicate event detected (key=%s…)", key[:12])
+            _LOGGER.debug("Duplicate event detected (key=%s…)", key[:16])
             return True
         self._seen[key] = now
         return False
@@ -85,7 +96,7 @@ class EventDedupeCache:
         """Build a dedup key for a single event dict."""
         event_id = event.get("eventId") or event.get("event_id")
         if event_id:
-            return str(event_id)
+            return _ID_PREFIX + str(event_id)
         raw = (
             account_name
             + "|"
@@ -93,11 +104,15 @@ class EventDedupeCache:
             + "|"
             + _json.dumps(event.get("data", ""), sort_keys=True)
         )
-        return hashlib.sha256(raw.encode()).hexdigest()
+        return _SIG_PREFIX + hashlib.sha256(raw.encode()).hexdigest()
 
     def _evict(self) -> None:
         """Remove expired entries."""
-        cutoff = time.monotonic() - self._ttl
-        expired = [k for k, t in self._seen.items() if t < cutoff]
+        now = time.monotonic()
+        expired = [
+            k
+            for k, t in self._seen.items()
+            if t < now - (self._id_ttl if k.startswith(_ID_PREFIX) else self._ttl)
+        ]
         for k in expired:
             del self._seen[k]

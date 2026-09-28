@@ -37,11 +37,16 @@ class PairedDevice:
         token_hash: str,
         name: str = "",
         created_at: float | None = None,
+        plugin_version: str | None = None,
+        last_seen: float | None = None,
     ) -> None:
         self.device_id = device_id
         self.token_hash = token_hash
         self.name = name
         self.created_at = created_at or time.time()
+        # Reported by the plugin in the X-Osrs-Exporter-Version header
+        self.plugin_version = plugin_version
+        self.last_seen = last_seen
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the device for persistence."""
@@ -50,6 +55,8 @@ class PairedDevice:
             "token_hash": self.token_hash,
             "name": self.name,
             "created_at": self.created_at,
+            "plugin_version": self.plugin_version,
+            "last_seen": self.last_seen,
         }
 
     @classmethod
@@ -60,6 +67,8 @@ class PairedDevice:
             token_hash=data["token_hash"],
             name=data.get("name", ""),
             created_at=data.get("created_at"),
+            plugin_version=data.get("plugin_version"),
+            last_seen=data.get("last_seen"),
         )
 
 
@@ -146,6 +155,22 @@ class PairingStore:
         token_hash = _hash_token(token)
         return self._token_index.get(token_hash)
 
+    def touch_device(self, device_id: str, plugin_version: str | None = None) -> bool:
+        """Record that *device_id* just sent data, and its plugin version.
+
+        ``last_seen`` is kept in memory on every call.  Returns True only
+        when the plugin version changed, so callers can skip a disk save
+        for ordinary traffic.
+        """
+        device = self._devices.get(device_id)
+        if device is None:
+            return False
+        device.last_seen = time.time()
+        if plugin_version and plugin_version != device.plugin_version:
+            device.plugin_version = plugin_version
+            return True
+        return False
+
     def revoke_device(self, device_id: str) -> bool:
         """Remove a paired device and invalidate its token."""
         device = self._devices.pop(device_id, None)
@@ -162,6 +187,8 @@ class PairingStore:
                 "device_id": d.device_id,
                 "name": d.name,
                 "created_at": d.created_at,
+                "plugin_version": d.plugin_version,
+                "last_seen": d.last_seen,
             }
             for d in self._devices.values()
         ]

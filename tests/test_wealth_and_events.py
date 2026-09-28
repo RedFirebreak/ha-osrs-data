@@ -31,10 +31,10 @@ _http_mod = sys.modules["homeassistant.components.http"]
 class _MockView:
     requires_auth = True
 
-    def json(self, data, status_code=200):
+    def json(self, data, status_code=200, headers=None):
         from aiohttp.web import json_response
 
-        return json_response(data, status=status_code)
+        return json_response(data, status=status_code, headers=headers)
 
 
 _http_mod.HomeAssistantView = _MockView

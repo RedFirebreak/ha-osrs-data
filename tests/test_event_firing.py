@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -34,9 +35,9 @@ class _MockView:
     """Minimal HomeAssistantView stand-in."""
     requires_auth = True
 
-    def json(self, data, status_code=200):
+    def json(self, data, status_code=200, headers=None):
         from aiohttp.web import json_response
-        return json_response(data, status=status_code)
+        return json_response(data, status=status_code, headers=headers)
 
 
 _http_mod.HomeAssistantView = _MockView
@@ -536,6 +537,32 @@ class TestEventDedupeCache:
             cache._seen[key] = time.monotonic() - 2
         assert cache.is_duplicate("player1", event) is False
 
+    def test_event_id_outlives_signature_ttl(self):
+        """The plugin can resend a queued event minutes later (backoff)."""
+        cache = EventDedupeCache(ttl=30, id_ttl=900)
+        event = {"type": "DEATH", "eventId": "uuid-late", "data": {}}
+        with patch("custom_components.osrs_data.dedupe.time.monotonic", return_value=1000.0):
+            cache.is_duplicate("player1", event)
+        with patch("custom_components.osrs_data.dedupe.time.monotonic", return_value=1300.0):
+            assert cache.is_duplicate("player1", event) is True
+
+    def test_event_id_expires_after_id_ttl(self):
+        cache = EventDedupeCache(ttl=30, id_ttl=900)
+        event = {"type": "DEATH", "eventId": "uuid-old", "data": {}}
+        with patch("custom_components.osrs_data.dedupe.time.monotonic", return_value=1000.0):
+            cache.is_duplicate("player1", event)
+        with patch("custom_components.osrs_data.dedupe.time.monotonic", return_value=1901.0):
+            assert cache.is_duplicate("player1", event) is False
+
+    def test_signature_keeps_short_ttl(self):
+        """Identical id-less events (e.g. two diary tasks) still pass after the short TTL."""
+        cache = EventDedupeCache(ttl=30, id_ttl=900)
+        event = {"type": "ACHIEVEMENTDIARY", "data": {"region": "Varrock"}}
+        with patch("custom_components.osrs_data.dedupe.time.monotonic", return_value=1000.0):
+            cache.is_duplicate("player1", event)
+        with patch("custom_components.osrs_data.dedupe.time.monotonic", return_value=1031.0):
+            assert cache.is_duplicate("player1", event) is False
+
 
 class TestPerEventDeduplication:
     """Integration tests for per-event dedup through the API."""
@@ -749,3 +776,114 @@ class TestOsrsEventTotalSensor:
         state = AccountState("hash1", "Player")
         sensor = OsrsEventTotalSensor(entry, state, "hash1", "DEATH")
         assert sensor._attr_name == "DEATH Total"
+
+
+# ── Plugin event timestamps (HA Exporter #28) ────────────────────────
+
+
+class TestEventTimestamps:
+    """Late-delivered events keep the time they happened in game."""
+
+    TS_MS = 1735689600000  # 2025-01-01T00:00:00Z
+    TS_ISO = "2025-01-01T00:00:00+00:00"
+
+    def _payload(self, event_type="death", data=None, **extra):
+        ev = {"type": event_type, "data": data if data is not None else {"killerName": "Jad"}}
+        ev.update(extra)
+        return {"player": _BASE_PLAYER, "events": [ev]}
+
+    async def _post(self, payload):
+        hass, store, token, _ = _setup_hass_and_token()
+        view = OsrsEventsView()
+        await view.post(_make_json_request(hass, payload, token))
+        return hass, store
+
+    def _per_event(self, hass):
+        return [c.args[1] for c in hass.bus.async_fire.call_args_list if "event_type" in c.args[1]]
+
+    @pytest.mark.asyncio
+    async def test_bus_event_has_id_and_occurred_at(self):
+        hass, _ = await self._post(self._payload(eventId="uuid-1", timestamp=self.TS_MS))
+        ev = self._per_event(hass)[0]
+        assert ev["event_id"] == "uuid-1"
+        assert ev["occurred_at"] == self.TS_ISO
+        assert ev["received_at"] != self.TS_ISO
+
+    @pytest.mark.asyncio
+    async def test_missing_timestamp_falls_back_to_now(self):
+        hass, _ = await self._post(self._payload())
+        ev = self._per_event(hass)[0]
+        assert ev["event_id"] is None
+        assert ev["occurred_at"].startswith(str(datetime.now(timezone.utc).year))
+
+    @pytest.mark.asyncio
+    async def test_bad_timestamp_falls_back_to_now(self):
+        hass, _ = await self._post(self._payload(timestamp="yesterday"))
+        assert self._per_event(hass)[0]["occurred_at"] != "yesterday"
+
+    @pytest.mark.asyncio
+    async def test_last_death_and_totals_use_event_time(self):
+        hass, store = await self._post(self._payload(timestamp=self.TS_MS))
+        acct = store.get_or_create(None, "TestPlayer")
+        assert acct.last_death["timestamp"] == self.TS_ISO
+        assert acct.event_totals["DEATH"]["last_fired"] == self.TS_ISO
+
+    @pytest.mark.asyncio
+    async def test_history_uses_event_time(self):
+        hass, _ = await self._post(self._payload(timestamp=self.TS_MS))
+        history = next(iter(hass.data[DOMAIN].values()))[DATA_HISTORY_STORE]
+        entries = history.get_or_create("TestPlayer").get("DEATH")
+        assert entries[0]["timestamp"] == self.TS_ISO
+
+
+class TestCollectionLogEvent:
+    """``collectionLog`` events from plugin #35."""
+
+    @pytest.mark.asyncio
+    async def test_collection_log_recorded(self):
+        hass, store, token, _ = _setup_hass_and_token()
+        payload = {
+            "player": _BASE_PLAYER,
+            "events": [{
+                "type": "collectionLog",
+                "data": {"itemName": "Abyssal whip", "itemId": 4151, "value": 1500000, "killCount": 312},
+            }],
+        }
+        await OsrsEventsView().post(_make_json_request(hass, payload, token))
+        acct = store.get_or_create(None, "TestPlayer")
+        assert acct.last_collection_log["itemName"] == "Abyssal whip"
+        assert acct.event_totals["COLLECTIONLOG"]["count"] == 1
+        history = next(iter(hass.data[DOMAIN].values()))[DATA_HISTORY_STORE]
+        entry = history.get_or_create("TestPlayer").get("COLLECTIONLOG")[0]
+        assert entry["summary"] == "New collection log item: Abyssal whip (KC 312)"
+
+    @pytest.mark.asyncio
+    async def test_collection_log_summary_without_kill_count(self):
+        hass, store, token, _ = _setup_hass_and_token()
+        payload = {
+            "player": _BASE_PLAYER,
+            "events": [{"type": "collectionLog", "data": {"itemName": "Mystery", "itemId": -1, "value": 0}}],
+        }
+        await OsrsEventsView().post(_make_json_request(hass, payload, token))
+        history = next(iter(hass.data[DOMAIN].values()))[DATA_HISTORY_STORE]
+        entry = history.get_or_create("TestPlayer").get("COLLECTIONLOG")[0]
+        assert entry["summary"] == "New collection log item: Mystery"
+
+    def test_collection_log_persisted(self):
+        acct = AccountStore().get_or_create(None, "TestPlayer")
+        acct.record_game_event("COLLECTIONLOG", {"itemName": "Abyssal whip"})
+        acct.plugin_version = "1.4"
+        acct.last_payload_ts = 123
+        data = acct.to_dict()
+        restored = AccountStore().get_or_create(None, "TestPlayer")
+        restored.load_dict(data)
+        assert restored.last_collection_log["itemName"] == "Abyssal whip"
+        assert restored.plugin_version == "1.4"
+        assert restored.last_payload_ts == 123
+
+    def test_old_persisted_data_loads(self):
+        restored = AccountStore().get_or_create(None, "TestPlayer")
+        restored.load_dict({"player_name": "TestPlayer"})
+        assert restored.last_collection_log == {}
+        assert restored.plugin_version is None
+        assert restored.last_payload_ts is None

@@ -27,6 +27,15 @@ def _normalize_player_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
+def _as_epoch_ms(value: Any) -> int | None:
+    """Return *value* as positive epoch millis, or None if it isn't one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value <= 0:
+        return None
+    return int(value)
+
+
 def _level_from_xp(xp: int) -> int:
     """Return the real (unboosted) skill level for a given total XP.
 
@@ -118,6 +127,23 @@ class AccountState:
         # Most recent rich event payloads (data + timestamp), empty until seen
         self.last_death: dict[str, Any] = {}
         self.last_loot: dict[str, Any] = {}
+        self.last_collection_log: dict[str, Any] = {}
+
+        # Plugin version from the X-Osrs-Exporter-Version header
+        self.plugin_version: str | None = None
+
+        # Root ``timestamp`` (epoch ms) of the newest applied snapshot.  The
+        # plugin can resend queued payloads late; older ones are not applied.
+        self.last_payload_ts: int | None = None
+
+    def is_stale(self, payload_ts: Any) -> bool:
+        """Return True if *payload_ts* is older than the last applied snapshot."""
+        ts = _as_epoch_ms(payload_ts)
+        return (
+            ts is not None
+            and self.last_payload_ts is not None
+            and ts < self.last_payload_ts
+        )
 
     def update_player_data(
         self,
@@ -131,6 +157,10 @@ class AccountState:
         now = datetime.now(timezone.utc).isoformat()
         self.last_update = now
         self.last_seen = datetime.now(timezone.utc)
+
+        payload_ts = _as_epoch_ms(parsed.get("timestamp"))
+        if payload_ts is not None:
+            self.last_payload_ts = payload_ts
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
@@ -215,9 +245,9 @@ class AccountState:
             del self.previous_names[:-_MAX_PREVIOUS_NAMES]
         self.player_name = player_name
 
-    def record_event(self, event_type: str) -> None:
+    def record_event(self, event_type: str, occurred_at: str | None = None) -> None:
         """Increment the counter for *event_type* and update last_fired."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = occurred_at or datetime.now(timezone.utc).isoformat()
         entry = self.event_totals.get(event_type)
         if entry is None:
             self.event_totals[event_type] = {"count": 1, "last_fired": now}
@@ -225,21 +255,31 @@ class AccountState:
             entry["count"] = entry.get("count", 0) + 1
             entry["last_fired"] = now
 
-    def record_game_event(self, event_type: str, data: dict[str, Any]) -> None:
+    def record_game_event(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        occurred_at: str | None = None,
+    ) -> None:
         """Record a game event: bump its counter and stash the rich payload.
 
-        DEATH/LOOT/PKLOOT payloads are stored (with a timestamp) so the
-        corresponding "Last …" sensors can surface killer, value lost,
-        loot total, etc.  All event types still bump the counter.
+        DEATH/LOOT/PKLOOT/COLLECTIONLOG payloads are stored (with a
+        timestamp) so the corresponding "Last …" sensors can surface
+        killer, value lost, loot total, etc.  All event types still bump
+        the counter.  *occurred_at* is when the event happened in game
+        (the plugin's event timestamp); defaults to now.
         """
-        self.record_event(event_type)
+        occurred_at = occurred_at or datetime.now(timezone.utc).isoformat()
+        self.record_event(event_type, occurred_at)
         if not isinstance(data, dict):
             return
-        stamped = {**data, "timestamp": datetime.now(timezone.utc).isoformat()}
+        stamped = {**data, "timestamp": occurred_at}
         if event_type == "DEATH":
             self.last_death = stamped
         elif event_type in ("LOOT", "PKLOOT"):
             self.last_loot = stamped
+        elif event_type == "COLLECTIONLOG":
+            self.last_collection_log = stamped
 
     # ── Computed aggregates ─────────────────────────────────────────
 
@@ -318,6 +358,9 @@ class AccountState:
             "event_totals": self.event_totals,
             "last_death": self.last_death,
             "last_loot": self.last_loot,
+            "last_collection_log": self.last_collection_log,
+            "plugin_version": self.plugin_version,
+            "last_payload_ts": self.last_payload_ts,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -350,6 +393,9 @@ class AccountState:
         self.event_totals = data.get("event_totals", {})
         self.last_death = data.get("last_death", {})
         self.last_loot = data.get("last_loot", {})
+        self.last_collection_log = data.get("last_collection_log", {})
+        self.plugin_version = data.get("plugin_version")
+        self.last_payload_ts = _as_epoch_ms(data.get("last_payload_ts"))
 
 
 class AccountStore:
