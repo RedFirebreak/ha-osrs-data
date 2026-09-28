@@ -92,7 +92,8 @@ class TestBaseParser:
         assert result["accountType"] == "normal"
         assert result["world"] is None
         assert result["skills"] == {}
-        assert result["inventory"] == []
+        # Sections that weren't sent are left out (not defaulted to empty)
+        assert "inventory" not in result
         assert result["events"] == []
 
     def test_missing_name_returns_none(self):
@@ -181,7 +182,7 @@ class TestInventoryParsing:
     def test_no_inventory_section(self):
         result = parse({"player": {"name": "P"}})
         assert result is not None
-        assert result["inventory"] == []
+        assert "inventory" not in result
 
     def test_item_defaults(self):
         result = parse({"player": {"name": "P", "inventory": {"items": [{}]}}})
@@ -220,7 +221,7 @@ class TestEquipmentParsing:
             assert result["equipment"][slot] == {}
 
     def test_all_known_slots(self):
-        result = parse({"player": {"name": "P"}})
+        result = parse({"player": {"name": "P", "equipment": {"items": []}}})
         assert result is not None
         assert set(result["equipment"].keys()) == set(EQUIPMENT_SLOTS)
 
@@ -645,3 +646,29 @@ class TestWrongTypesAreSkipped:
     def test_name_must_be_a_non_blank_string(self):
         for bad in (7, True, ["P"], {"n": "P"}, "   "):
             assert parse({"player": {"name": bad}}) is None, bad
+
+
+
+class TestAbsentSections:
+    """A section the plugin leaves out is not in the result (not defaulted)."""
+
+    SECTIONS = ("inventory", "equipment", "health", "prayerPoints", "location", "spellbook")
+
+    def test_absent_sections_are_left_out(self):
+        result = parse({"player": {"name": "P"}})
+        for section in self.SECTIONS:
+            assert section not in result, section
+
+    def test_null_sections_are_left_out(self):
+        result = parse({"player": {"name": "P", **{s: None for s in self.SECTIONS}}})
+        for section in self.SECTIONS:
+            assert section not in result, section
+
+    def test_present_but_empty_sections_are_kept(self):
+        result = parse({"player": {
+            "name": "P",
+            "inventory": {"items": []},
+            "equipment": {},
+        }})
+        assert result["inventory"] == []
+        assert result["equipment"] == {slot: {} for slot in EQUIPMENT_SLOTS}

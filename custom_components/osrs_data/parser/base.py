@@ -64,17 +64,26 @@ def _parse_items(section: str, data: dict[str, Any]) -> list[dict[str, Any]] | N
     return [item for item in items if isinstance(item, dict)]
 
 
-def _parse_numbers(
-    section: str, data: Any, fields: tuple[str, ...]
-) -> dict[str, Any] | None:
-    """Return *fields* of an object section (missing ones are 0).
+def _object_section(player: dict[str, Any], section: str) -> dict[str, Any] | None:
+    """Return ``player[section]`` if it is an object.
 
-    Returns None, skipping the whole section, if it isn't an object or
-    any field isn't a number.
+    Returns None if the section is absent or null (not sent), or of the
+    wrong type (skipped with a debug log).
     """
-    if not isinstance(data, dict):
+    data = player.get(section)
+    if data is not None and not isinstance(data, dict):
         _skip(section, data)
         return None
+    return data
+
+
+def _parse_numbers(
+    section: str, data: dict[str, Any], fields: tuple[str, ...]
+) -> dict[str, Any] | None:
+    """Return *fields* of a section (missing ones are 0).
+
+    Returns None, skipping the whole section, if any field isn't a number.
+    """
     result = {field: data.get(field, 0) for field in fields}
     for field, value in result.items():
         if not _is_number(value):
@@ -88,8 +97,10 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
 
     Returns a normalized dict with player data, or *None* if the payload
     has no usable ``player`` (an object with a non-blank string ``name``).
-    A section of the wrong shape (inventory, equipment, health,
-    prayerPoints, location, spellbook) is left out of the result.
+    The sections inventory, equipment, health, prayerPoints, location
+    and spellbook are only in the result when the payload has them: the
+    plugin's per-connection filters can leave any of them out, and a
+    section of the wrong shape is left out too.
     """
     player = payload.get("player")
     if not player or not isinstance(player, dict):
@@ -108,6 +119,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
             _skip("world", world)
         world = None
 
+    # Sections that were received (absent or null ones are left out).
     result: dict[str, Any] = {}
 
     # ── Skills ───────────────────────────────────────────────────────
@@ -129,21 +141,13 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         skills[skill_name] = {"xp": xp, "level": level}
 
     # ── Inventory (max 28 slots) ─────────────────────────────────────
-    inv_data = player.get("inventory")
-    if inv_data is None:
-        result["inventory"] = []
-    elif not isinstance(inv_data, dict):
-        _skip("inventory", inv_data)
-    elif (inv_items := _parse_items("inventory", inv_data)) is not None:
+    inv_data = _object_section(player, "inventory")
+    if inv_data is not None and (inv_items := _parse_items("inventory", inv_data)) is not None:
         result["inventory"] = [_parse_item(item) for item in inv_items[:28]]
 
     # ── Equipment — normalise to per-slot dict ───────────────────────
-    equip_data = player.get("equipment")
-    if equip_data is None:
-        result["equipment"] = {slot: {} for slot in EQUIPMENT_SLOTS}
-    elif not isinstance(equip_data, dict):
-        _skip("equipment", equip_data)
-    elif (equip_items := _parse_items("equipment", equip_data)) is not None:
+    equip_data = _object_section(player, "equipment")
+    if equip_data is not None and (equip_items := _parse_items("equipment", equip_data)) is not None:
         equipment: dict[str, dict[str, Any]] = {slot: {} for slot in EQUIPMENT_SLOTS}
         for item in equip_items:
             slot = item.get("equipmentSlot")
@@ -154,25 +158,20 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
                 equipment[slot.upper()] = _parse_item(item)
         result["equipment"] = equipment
 
-    # ── Health, prayer points, location, spellbook ───────────────────
-    defaults: dict[str, dict[str, Any]] = {
-        "health": {"current": 0, "max": 0},
-        "prayerPoints": {"current": 0, "max": 0},
-        "location": {"x": 0, "y": 0, "plane": 0},
+    # ── Health, prayer points, location ──────────────────────────────
+    number_sections: dict[str, tuple[str, ...]] = {
+        "health": ("current", "max"),
+        "prayerPoints": ("current", "max"),
+        "location": ("x", "y", "plane"),
     }
-    for section, default in defaults.items():
-        data = player.get(section)
-        if data is None:
-            result[section] = default
-        elif (parsed := _parse_numbers(section, data, tuple(default))) is not None:
-            result[section] = parsed
+    for section, fields in number_sections.items():
+        data = _object_section(player, section)
+        if data is not None and (numbers := _parse_numbers(section, data, fields)) is not None:
+            result[section] = numbers
 
-    spellbook_data = player.get("spellbook")
-    if spellbook_data is None:
-        result["spellbook"] = {"id": 0, "name": ""}
-    elif not isinstance(spellbook_data, dict):
-        _skip("spellbook", spellbook_data)
-    else:
+    # ── Spellbook ────────────────────────────────────────────────────
+    spellbook_data = _object_section(player, "spellbook")
+    if spellbook_data is not None:
         spellbook_id = spellbook_data.get("id", 0)
         spellbook_name = spellbook_data.get("name", "")
         if _is_int(spellbook_id) and isinstance(spellbook_name, str):

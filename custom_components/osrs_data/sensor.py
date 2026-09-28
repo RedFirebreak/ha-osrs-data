@@ -240,6 +240,7 @@ class OsrsInventorySensor(SensorEntity):
             "items": self._state.inventory,
             "slots_used": len(self._state.inventory),
             "slots_total": 28,
+            "received": "inventory" in self._state.received_sections,
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
@@ -290,6 +291,7 @@ class OsrsSpellbookSensor(SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs: dict[str, Any] = {
             "id": self._state.spellbook.get("id", 0),
+            "received": "spellbook" in self._state.received_sections,
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
@@ -344,6 +346,7 @@ class OsrsLocationSensor(SensorEntity):
             "x": loc.get("x", 0),
             "y": loc.get("y", 0),
             "plane": loc.get("plane", 0),
+            "received": "location" in self._state.received_sections,
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
@@ -395,6 +398,7 @@ class OsrsPrayerPointsSensor(SensorEntity):
         attrs: dict[str, Any] = {
             "current": self._state.prayer_points.get("current", 0),
             "max": self._state.prayer_points.get("max", 0),
+            "received": "prayerPoints" in self._state.received_sections,
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
@@ -446,6 +450,7 @@ class OsrsHealthSensor(SensorEntity):
         attrs: dict[str, Any] = {
             "current": self._state.health.get("current", 0),
             "max": self._state.health.get("max", 0),
+            "received": "health" in self._state.received_sections,
         }
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
@@ -498,6 +503,7 @@ class OsrsEquipmentSensor(SensorEntity):
         attrs: dict[str, Any] = {}
         for slot in EQUIPMENT_SLOTS:
             attrs[slot] = self._state.equipment.get(slot, {})
+        attrs["received"] = "equipment" in self._state.received_sections
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
         return attrs

@@ -22,6 +22,18 @@ from .const import (
 
 _MAX_PREVIOUS_NAMES = 10
 
+# Snapshot sections (parsed key -> AccountState attribute).  The plugin's
+# per-connection filters can leave any of them out; a missing section
+# keeps its last known value.
+SNAPSHOT_SECTIONS: dict[str, str] = {
+    "inventory": "inventory",
+    "equipment": "equipment",
+    "health": "health",
+    "prayerPoints": "prayer_points",
+    "location": "location",
+    "spellbook": "spellbook",
+}
+
 
 def _normalize_player_name(name: str) -> str:
     """Normalize an RSN to a stable key (lowercase, collapse whitespace)."""
@@ -120,6 +132,9 @@ class AccountState:
         # Spellbook: {id: int, name: str}
         self.spellbook: dict[str, Any] = {"id": 0, "name": ""}
 
+        # SNAPSHOT_SECTIONS keys that the latest applied snapshot contained
+        self.received_sections: set[str] = set()
+
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
 
@@ -213,12 +228,13 @@ class AccountState:
         # Update game state
         self.game_state = parsed.get("state", "UNKNOWN")
 
-        self.inventory = parsed.get("inventory", [])
-        self.equipment = parsed.get("equipment", {})
-        self.health = parsed.get("health", {"current": 0, "max": 0})
-        self.prayer_points = parsed.get("prayerPoints", {"current": 0, "max": 0})
-        self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
-        self.spellbook = parsed.get("spellbook", {"id": 0, "name": ""})
+        # A section the plugin left out keeps its last known value.
+        self.received_sections = set()
+        for section, attr in SNAPSHOT_SECTIONS.items():
+            value = parsed.get(section)
+            if value is not None:
+                setattr(self, attr, value)
+                self.received_sections.add(section)
 
         # Determine presence: default to online (heartbeat), then let
         # events override.  This block runs BEFORE skill processing so
@@ -385,6 +401,7 @@ class AccountState:
             "prayerPoints": self.prayer_points,
             "location": self.location,
             "spellbook": self.spellbook,
+            "received_sections": sorted(self.received_sections),
             "events": self.events,
             "game_state": self.game_state,
             "detail_sensors": self.detail_sensors,
@@ -417,6 +434,13 @@ class AccountState:
         self.prayer_points = data.get("prayerPoints", {"current": 0, "max": 0})
         self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
         self.spellbook = data.get("spellbook", {"id": 0, "name": ""})
+        received = data.get("received_sections")
+        # Older versions replaced every section on each snapshot.
+        self.received_sections = (
+            {s for s in received if s in SNAPSHOT_SECTIONS}
+            if isinstance(received, list)
+            else set(SNAPSHOT_SECTIONS)
+        )
         self.events = data.get("events", [])
         self.game_state = data.get("game_state", "UNKNOWN")
         self.detail_sensors = data.get("detail_sensors", {})

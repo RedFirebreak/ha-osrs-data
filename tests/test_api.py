@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -68,7 +69,7 @@ from custom_components.osrs_data.const import (  # noqa: E402
 from custom_components.osrs_data.dedupe import EventDedupeCache  # noqa: E402
 from custom_components.osrs_data.history import HistoryStore  # noqa: E402
 from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
-from tests.test_parsers import FUZZ_PATHS, FUZZ_VALUES, fuzzed  # noqa: E402
+from tests.test_parsers import FUZZ_BASE, FUZZ_PATHS, FUZZ_VALUES, fuzzed  # noqa: E402
 
 
 # ── Sample payloads ──────────────────────────────────────────────────
@@ -1023,3 +1024,60 @@ class TestSnapshotClockSkew:
         await _post_events(hass, pair["token"], self._payload(1_000, "999"))
 
         assert restarted.get_or_create(None, "PlayerOne").world == "302"
+
+
+SECTIONS = ("inventory", "equipment", "health", "prayerPoints", "location", "spellbook")
+SECTION_ATTRS = ("inventory", "equipment", "health", "prayer_points", "location", "spellbook")
+
+
+class TestFilteredSections:
+    """The plugin's per-connection filters can leave sections out."""
+
+    def _full(self):
+        payload = copy.deepcopy(FUZZ_BASE)
+        payload["events"] = []
+        del payload["timestamp"]
+        return payload
+
+    def _without_sections(self):
+        payload = self._full()
+        for section in SECTIONS:
+            del payload["player"][section]
+        payload["player"]["world"] = "303"
+        return payload
+
+    @pytest.mark.asyncio
+    async def test_missing_sections_keep_last_known_values(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._full())
+        acct = store.get_or_create(None, "PlayerOne")
+        before = {attr: copy.deepcopy(getattr(acct, attr)) for attr in SECTION_ATTRS}
+        assert acct.location == {"x": 3200, "y": 3200, "plane": 0}
+
+        await _post_events(hass, pair["token"], self._without_sections())
+
+        assert acct.world == "303"  # the snapshot itself was applied
+        for attr, value in before.items():
+            assert getattr(acct, attr) == value, attr
+        assert acct.received_sections == set()
+
+    @pytest.mark.asyncio
+    async def test_sections_received_again(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._full())
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.received_sections == set(SECTIONS)
+        await _post_events(hass, pair["token"], self._without_sections())
+        await _post_events(hass, pair["token"], self._full())
+        assert acct.received_sections == set(SECTIONS)
+
+    @pytest.mark.asyncio
+    async def test_empty_section_still_clears(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._full())
+        emptied = self._full()
+        emptied["player"]["inventory"] = {"items": []}
+        await _post_events(hass, pair["token"], emptied)
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.inventory == []
+        assert "inventory" in acct.received_sections
