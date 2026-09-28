@@ -8,5 +8,6 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/RedFirebreak/ha-osrs-data/issues",
   "requirements": [],
+  "single_config_entry": true,
   "version": "2026.2.16"
 }

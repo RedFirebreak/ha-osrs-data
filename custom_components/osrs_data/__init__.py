@@ -62,6 +62,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OSRS Data from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
+    # Only one entry is supported (manifest ``single_config_entry``): all
+    # entries would share one storage file, and the HTTP views only serve
+    # the first one.  A duplicate left over from an older version is not
+    # set up, so it can't overwrite the first entry's data.
+    loaded = [
+        entry_id
+        for entry_id in hass.data[DOMAIN]
+        if not (isinstance(entry_id, str) and entry_id.startswith("_"))
+    ]
+    if any(entry_id != entry.entry_id for entry_id in loaded):
+        _LOGGER.error(
+            "Only one OSRS Data integration entry is supported; delete the "
+            "duplicate entry '%s' (paired clients and data are kept)",
+            entry.title,
+        )
+        return False
+
     # Resolve configurable options (defaults preserve prior behavior).
     opts = entry.options
     history_limits = {
@@ -311,8 +328,17 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle removal (deletion) of a config entry.
 
     This fires *after* async_unload_entry and removes persisted storage
-    so the next install starts completely fresh.
+    so the next install starts completely fresh.  The storage is shared,
+    so it is kept while another (duplicate) entry still exists.
     """
+    others = [
+        other
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ]
+    if others:
+        _LOGGER.info("OSRS Data storage kept: another entry still uses it")
+        return
     store = get_store(hass)
     await store.async_remove()
     _LOGGER.info("OSRS Data storage removed for deleted entry")
