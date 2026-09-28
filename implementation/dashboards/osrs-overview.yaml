@@ -1,4 +1,10 @@
-# OSRS Data — example dashboard view
+# OSRS Data — example dashboard view (CORE-ONLY, no custom cards)
+#
+# This is the dependency-free example: it uses only built-in Lovelace
+# cards, so it works on any Home Assistant install with nothing to install
+# from HACS. For the richer "player progress" dashboard (Mushroom +
+# ApexCharts + auto-entities, XP trends, auto skills grid), see
+# osrs-progress.yaml in this folder.
 #
 # Paste this under a Lovelace dashboard in YAML mode, or add it as a new
 # view. Replace "myrsn" in every entity_id with the slug of your account
@@ -58,7 +64,7 @@ cards:
     title: Last loot
     entities:
       - entity: sensor.osrs_myrsn_last_loot
-        name: Source
+        name: Drop
         secondary_info: last-changed
     footer:
       type: attribute

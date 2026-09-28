@@ -143,7 +143,7 @@ data:
   limit: 20
 ```
 
-The **Last Death** and **Last Loot** sensors also expose the most recent 10 entries via their `recent` attribute, so a dashboard can list them without calling a service (see [`implementation/dashboards/osrs-overview.yaml`](implementation/dashboards/osrs-overview.yaml)).
+The **Last Death** and **Last Loot** sensors also expose the most recent 10 entries via their `recent` attribute, so a dashboard can list them without calling a service (both example dashboards in [`implementation/dashboards/`](implementation/dashboards/) render these as recent loot/death tables).
 
 ### Options
 
@@ -496,9 +496,10 @@ The [`implementation/`](implementation/) folder contains ready-to-use Home Assis
 | Notify on valuable loot | Blueprint | Notifies when LOOT/PKLOOT `totalValue` meets a configurable threshold |
 | Low HP alert | Blueprint | Notifies (and optionally flashes a light red) when a Health sensor drops below a threshold |
 | Flash single light | Script | Helper script used by the wave blueprint to run a blink cycle on one light |
-| OSRS overview | Dashboard | Example Lovelace view showing vitals, levels, gear, and recent deaths/loot |
+| **Player Progress** | Dashboard | Rich player dashboard — status, vitals, XP-over-time charts, auto skills grid, recent loot/deaths (needs Mushroom + apexcharts-card + auto-entities from HACS) |
+| OSRS overview | Dashboard | Core-only Lovelace view (no custom cards) showing vitals, levels, gear, and recent deaths/loot |
 
-See the [implementation README](implementation/README.md) for full installation and usage instructions.
+See the [implementation README](implementation/README.md) for full installation and usage instructions, including the dashboard [prerequisites](implementation/README.md#installing-the-dashboards) and an optional multi-account dropdown.
 
 ## Project Structure
 
