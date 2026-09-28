@@ -171,7 +171,9 @@ class OsrsPlayerInfoSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        attrs: dict[str, Any] = {}
+        attrs: dict[str, Any] = {"display_name": self._state.player_name}
+        if self._state.previous_names:
+            attrs["previous_names"] = self._state.previous_names
         if self._state.account_type:
             attrs["account_type"] = self._state.account_type
         if self._state.world is not None:

@@ -260,11 +260,22 @@ class OsrsEventsView(HomeAssistantView):
                 _LOGGER.debug("Dropping duplicate data for %s", account_id)
                 return self.json({"ok": True, "duplicate": True})
 
-            # Use player name as account key (no hash in new format)
+            # The plugin's accountHash (when sent) is a lookup alias so a
+            # renamed account resolves to its existing device/entities.
             store = entry_data.get(DATA_ACCOUNT_STORE)
             if store is not None:
-                acct = store.get_or_create(None, player_name)
+                acct = store.get_or_create(
+                    None, player_name, plugin_hash=parsed.get("accountHash")
+                )
+                old_name = acct.player_name
                 acct.update_player_data(parsed, player_name=player_name)
+                if old_name != player_name:
+                    # History is keyed by display name; carry it over.
+                    history = entry_data.get(DATA_HISTORY_STORE)
+                    if history is not None:
+                        history.rename(old_name, player_name)
+                    if acct.previous_names and acct.previous_names[-1] == old_name:
+                        _LOGGER.info("OSRS account %s renamed to %s", old_name, player_name)
 
                 async_dispatcher_send(
                     hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash

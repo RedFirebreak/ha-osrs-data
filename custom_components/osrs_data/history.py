@@ -106,6 +106,28 @@ class HistoryStore:
             )
         return self._accounts[account_key]
 
+    def rename(self, old_key: str, new_key: str) -> None:
+        """Move *old_key*'s history under *new_key* (e.g. after a name change).
+
+        If *new_key* already has history the two are merged per event type,
+        oldest first, keeping the newest entries within each buffer limit.
+        """
+        if old_key == new_key or old_key not in self._accounts:
+            return
+        old = self._accounts.pop(old_key)
+        existing = self._accounts.get(new_key)
+        if existing is None:
+            self._accounts[new_key] = old
+            return
+        merged = AccountHistory(self._limits, self._default_limit)
+        old_data = old.to_dict()
+        new_data = existing.to_dict()
+        for event_type in {*old_data, *new_data}:
+            entries = old_data.get(event_type, []) + new_data.get(event_type, [])
+            entries.sort(key=lambda e: e.get("timestamp", ""))
+            merged.load_dict({event_type: entries})
+        self._accounts[new_key] = merged
+
     def to_dict(self) -> dict[str, Any]:
         return {
             key: hist.to_dict() for key, hist in self._accounts.items()
