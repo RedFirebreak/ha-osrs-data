@@ -238,9 +238,11 @@ class OsrsEventsView(HomeAssistantView):
         if pairing_store is None:
             return self.json({"ok": False, "error": "Pairing not available"}, status_code=503)
 
+        # 401 (not 403) so the plugin disables the connection instead of
+        # retrying forever with a revoked token.
         device_id = pairing_store.validate_token(token)
         if device_id is None:
-            return self.json({"ok": False, "error": "Invalid or revoked token"}, status_code=403)
+            return self.json({"ok": False, "error": "Invalid or revoked token"}, status_code=401)
 
         try:
             payload = await request.json()

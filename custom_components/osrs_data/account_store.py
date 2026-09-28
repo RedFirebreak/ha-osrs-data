@@ -11,7 +11,12 @@ from typing import Any
 _LOGGER = logging.getLogger(__name__)
 
 # Import tick constants for timeout calculation
-from .const import PRESENCE_TIMEOUT, TICK_DURATION, TICK_TIMEOUT_MULTIPLIER
+from .const import (
+    NON_MAIN_WORLD_TYPES,
+    PRESENCE_TIMEOUT,
+    TICK_DURATION,
+    TICK_TIMEOUT_MULTIPLIER,
+)
 
 
 def _normalize_player_name(name: str) -> str:
@@ -50,6 +55,8 @@ class AccountState:
         self.player_name: str = player_name
         self.account_type: str | None = None
         self.world: str | None = None
+        # World types of the current world (e.g. MEMBERS, SEASONAL)
+        self.world_types: list[str] = []
 
         # Fallback presence timeout (seconds) used when no tickDelay known.
         self._presence_timeout_fallback: float = presence_timeout
@@ -116,6 +123,7 @@ class AccountState:
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
+        self.world_types = parsed.get("worldTypes") or []
         self.events = parsed.get("events", [])
 
         # Update tick delay if provided in this payload
@@ -163,7 +171,10 @@ class AccountState:
                     self.is_online = True
                     self.offline_reason = "online"
 
-        # Update skills and detail sensors
+        # Update skills and detail sensors — skipped on Leagues/DMM/etc.
+        # worlds so their separate stats don't overwrite main-game values.
+        if NON_MAIN_WORLD_TYPES.intersection(self.world_types):
+            return
         new_skills = parsed.get("skills", {})
         for skill_name, skill_data in new_skills.items():
             new_xp = skill_data.get("xp", 0)
@@ -265,6 +276,7 @@ class AccountState:
             "player_name": self.player_name,
             "account_type": self.account_type,
             "world": self.world,
+            "world_types": self.world_types,
             "skills": self.skills,
             "inventory": self.inventory,
             "equipment": self.equipment,
@@ -290,6 +302,7 @@ class AccountState:
         self.player_name = data.get("player_name", self.player_name)
         self.account_type = data.get("account_type")
         self.world = data.get("world")
+        self.world_types = data.get("world_types", [])
         self.skills = data.get("skills", {})
         self.inventory = data.get("inventory", [])
         self.equipment = data.get("equipment", {})

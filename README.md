@@ -92,7 +92,7 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 
 | Sensor | State | Key Attributes |
 |--------|-------|----------------|
-| **Player Info** | Player name | `account_type`, `world`, `last_update`, `events` |
+| **Player Info** | Player name | `account_type`, `world`, `world_types`, `last_update`, `events` |
 | **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28) |
 | **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
 | **Health** | Current HP | `current`, `max`, `last_update` |
@@ -108,6 +108,8 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **\<EVENT\> Total** *(per event type)* | Cumulative event count | `last_fired` |
 
 Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death** and **Last Loot** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)).
+
+On special worlds (Leagues/`SEASONAL`, `DEADMAN`, `BETA_WORLD`, `TOURNAMENT_WORLD`, `QUEST_SPEEDRUNNING`, `NOSAVE_MODE`, `PVP_ARENA`) skill, Total Level and Combat Level sensors are **not** updated, so those separate stats never overwrite your main-game values. Live sensors (health, world, location, online status, …) keep updating.
 
 ### Game State Values
 
@@ -161,7 +163,7 @@ Changing options reloads the integration so the new values take effect immediate
 
 ### Event deduplication
 
-If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a configurable window (30 s by default). Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `event_id` field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
+If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a configurable window (30 s by default). Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `eventId` (or legacy `event_id`) field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
 
 ### Event types
 

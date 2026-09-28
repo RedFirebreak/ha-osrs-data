@@ -176,6 +176,8 @@ class OsrsPlayerInfoSensor(SensorEntity):
             attrs["account_type"] = self._state.account_type
         if self._state.world is not None:
             attrs["world"] = self._state.world
+        if self._state.world_types:
+            attrs["world_types"] = self._state.world_types
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
         if self._state.events:
