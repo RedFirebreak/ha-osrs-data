@@ -726,7 +726,7 @@ class OsrsLastDeathSensor(SensorEntity):
                     "timestamp": death.get("timestamp"),
                 }
             )
-        attrs["recent"] = _recent_history(self, self._state.player_name, "DEATH")
+        attrs["recent"] = _recent_history(self, self._state.account_hash, "DEATH")
         return attrs
 
     @property
@@ -797,7 +797,7 @@ class OsrsLastLootSensor(SensorEntity):
                     "timestamp": loot.get("timestamp"),
                 }
             )
-        attrs["recent"] = _recent_history(self, self._state.player_name, "LOOT")
+        attrs["recent"] = _recent_history(self, self._state.account_hash, "LOOT")
         return attrs
 
     @property
@@ -855,7 +855,7 @@ class OsrsLastCollectionLogSensor(SensorEntity):
                     "timestamp": item.get("timestamp"),
                 }
             )
-        attrs["recent"] = _recent_history(self, self._state.player_name, "COLLECTIONLOG")
+        attrs["recent"] = _recent_history(self, self._state.account_hash, "COLLECTIONLOG")
         return attrs
 
     @property

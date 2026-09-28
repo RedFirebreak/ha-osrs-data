@@ -256,7 +256,8 @@ class TestHistoryRecording:
         view = OsrsEventsView()
         await view.post(_make_request(hass, _PAYLOAD, token))
 
-        hist = history.get_or_create("TestPlayer")
+        # History is keyed by the account key
+        hist = history.get_or_create("testplayer")
         deaths = hist.get("DEATH")
         loot = hist.get("LOOT")
         assert len(deaths) == 1

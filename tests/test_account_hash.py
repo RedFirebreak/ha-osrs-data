@@ -26,7 +26,6 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
-from custom_components.osrs_data.history import HistoryStore  # noqa: E402
 
 HASH_A = "a" * 56
 HASH_B = "b" * 56
@@ -177,36 +176,3 @@ class TestPersistence:
         assert acct.plugin_account_hash == HASH_A
         assert acct.previous_names == []
 
-
-class TestHistoryRename:
-    def test_rename_moves_history(self):
-        hist = HistoryStore()
-        hist.get_or_create("Old").record("DEATH", "died", {})
-        hist.rename("Old", "New")
-        assert "Old" not in hist.to_dict()
-        assert len(hist.get_or_create("New").get("DEATH")) == 1
-
-    def test_rename_merges_into_existing(self):
-        hist = HistoryStore(limits={"DEATH": 3}, default_limit=3)
-        old = hist.get_or_create("Old")
-        new = hist.get_or_create("New")
-        old.load_dict({"DEATH": [
-            {"timestamp": "2026-01-01", "summary": "o1"},
-            {"timestamp": "2026-01-03", "summary": "o2"},
-        ]})
-        new.load_dict({"DEATH": [
-            {"timestamp": "2026-01-02", "summary": "n1"},
-            {"timestamp": "2026-01-04", "summary": "n2"},
-        ]})
-        hist.rename("Old", "New")
-        summaries = [e["summary"] for e in hist.get_or_create("New").get("DEATH")]
-        # Oldest dropped by the limit, remainder in chronological order
-        assert summaries == ["n1", "o2", "n2"]
-
-    def test_rename_missing_or_same_is_noop(self):
-        hist = HistoryStore()
-        hist.rename("Nope", "New")
-        assert hist.to_dict() == {}
-        hist.get_or_create("Same").record("DEATH", "x", {})
-        hist.rename("Same", "Same")
-        assert len(hist.get_or_create("Same").get("DEATH")) == 1

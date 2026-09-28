@@ -388,9 +388,40 @@ class TestEventsAccountHash:
         assert acct.previous_names == ["OldName"]
         dispatched = {c.args[2] for c in send.call_args_list}
         assert dispatched == {"oldname"}
-        deaths = history.get_or_create("NewName").get("DEATH")
+        # History is keyed by the account key, so the rename doesn't move it.
+        deaths = history.get_or_create("oldname").get("DEATH")
         assert [d["data"]["killerName"] for d in deaths] == ["Jad", "Zuk"]
-        assert "OldName" not in history.to_dict()
+        assert set(history.to_dict()) == {"oldname"}
+
+    @pytest.mark.asyncio
+    async def test_name_swap_keeps_histories_apart(self):
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        token = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())["token"]
+        history = hass.data[DOMAIN]["test_entry"][DATA_HISTORY_STORE]
+        hash_a, hash_b = "a" * 56, "b" * 56
+        for name, account_hash, ts, killer in (
+            ("Alice", hash_a, 1_000, "a1"),
+            ("Bob", hash_b, 1_000, "b1"),
+            ("Bob", hash_a, 2_000, "a2"),    # A takes the name Bob ...
+            ("Alice", hash_b, 2_000, "b2"),  # ... and B takes Alice
+        ):
+            payload = {
+                **self._payload(name, account_hash),
+                "timestamp": ts,
+                "events": [{"type": "death", "eventId": killer, "data": {"killerName": killer}}],
+            }
+            assert (await self._post(hass, token, payload)).status == 200
+
+        a = store.get_or_create(None, "?", plugin_hash=hash_a)
+        b = store.get_or_create(None, "?", plugin_hash=hash_b)
+        assert (a.player_name, b.player_name) == ("Bob", "Alice")
+
+        def killers(acct):
+            deaths = history.get_or_create(acct.account_hash).get("DEATH")
+            return [d["data"]["killerName"] for d in deaths]
+
+        assert killers(a) == ["a1", "a2"]
+        assert killers(b) == ["b1", "b2"]
 
     async def _renamed_then_late_resend(self):
         """Rename OldName -> NewName, then deliver a queued OldName payload."""

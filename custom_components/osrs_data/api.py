@@ -343,15 +343,15 @@ class OsrsEventsView(HomeAssistantView):
                     acct.update_player_data(
                         parsed, player_name=player_name, device_id=device_id
                     )
-                    if old_name != player_name:
-                        # History is keyed by display name; carry it over.
-                        history = entry_data.get(DATA_HISTORY_STORE)
-                        if history is not None:
-                            history.rename(old_name, player_name)
-                        if acct.previous_names and acct.previous_names[-1] == old_name:
-                            _LOGGER.info("OSRS account %s renamed to %s", old_name, player_name)
-                # History is keyed by the account's current display name.
-                account_id = acct.player_name
+                    if (
+                        old_name != player_name
+                        and acct.previous_names
+                        and acct.previous_names[-1] == old_name
+                    ):
+                        _LOGGER.info("OSRS account %s renamed to %s", old_name, player_name)
+                # History is keyed by the immutable account key, so it
+                # follows the account through name changes.
+                account_id = acct.account_hash
 
             event_data = _build_normalized_event(parsed)
             hass.bus.async_fire(EVENT_TYPE, event_data)

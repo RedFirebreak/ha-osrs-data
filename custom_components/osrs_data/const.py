@@ -6,6 +6,8 @@ CONF_TITLE = "title"
 
 # Storage
 STORAGE_VERSION = 2
+# 2.2: history keyed by account key instead of display name
+STORAGE_MINOR_VERSION = 2
 STORAGE_KEY = f"{DOMAIN}_store"
 
 # Data key for the per-entry AccountStore kept in hass.data

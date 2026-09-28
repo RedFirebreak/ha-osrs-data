@@ -534,6 +534,10 @@ class AccountStore:
             n += 1
         return key
 
+    def find_by_name(self, player_name: str) -> AccountState | None:
+        """Return the account currently named *player_name*, if any."""
+        return self._find_by_name(_normalize_player_name(player_name))
+
     def _find_by_name(self, norm: str) -> AccountState | None:
         """Return the account whose *current* display name is *norm*.
 

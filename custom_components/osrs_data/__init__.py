@@ -213,20 +213,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             event_type = event_type.upper()
         limit = call.data.get("limit", 20)
 
-        if account_name:
-            keys = [account_name]
-        else:
-            keys = [acct.player_name for acct in acct_store.accounts]
-
-        entries: list[dict] = []
-        for key in keys:
-            hist = history_store.get_or_create(key)
-            items = hist.get(event_type) if event_type else hist.all_entries()
-            for item in items:
-                entries.append({**item, "account_name": key})
-
-        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
-        return {"entries": entries[:limit]}
+        return {
+            "entries": _history_entries(
+                acct_store, history_store, account_name, event_type, limit
+            )
+        }
 
     if not hass.services.has_service(DOMAIN, "get_history"):
         hass.services.async_register(
@@ -286,6 +277,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_dispatcher_send(hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash)
 
     return True
+
+
+def _history_entries(
+    account_store: AccountStore,
+    history_store: HistoryStore,
+    account_name: str | None,
+    event_type: str | None,
+    limit: int,
+) -> list[dict]:
+    """Return history entries, newest first, for the ``get_history`` service.
+
+    History is keyed by account key; the service takes and returns the
+    account's current display name.  A name no account has any more
+    falls back to history still stored under that name.
+    """
+    if account_name:
+        acct = account_store.find_by_name(account_name)
+        targets = (
+            [(acct.account_hash, acct.player_name)]
+            if acct is not None
+            else [(account_name, account_name)]
+        )
+    else:
+        targets = [(acct.account_hash, acct.player_name) for acct in account_store.accounts]
+
+    entries: list[dict] = []
+    for key, name in targets:
+        hist = history_store.get_or_create(key)
+        items = hist.get(event_type) if event_type else hist.all_entries()
+        entries.extend({**item, "account_name": name} for item in items)
+
+    entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    return entries[:limit]
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
