@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -804,3 +806,99 @@ class TestStaleSnapshot:
         legacy = {"player": {"name": "PlayerOne", "world": "310"}, "events": []}
         await _post_events(hass, pair["token"], legacy)
         assert store.get_or_create(None, "PlayerOne").world == "310"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class TestSnapshotClockSkew:
+    """Payload timestamps come from the player's PC clock, which can be wrong."""
+
+    HOUR_MS = 3_600_000
+    DAY_MS = 86_400_000
+
+    def _payload(self, ts, world, events=None):
+        return {
+            "player": {"name": "PlayerOne", "world": world},
+            "events": events or [],
+            "timestamp": ts,
+        }
+
+    @pytest.mark.asyncio
+    async def test_future_timestamp_does_not_freeze_snapshots(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(_now_ms() + self.DAY_MS, "302"))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.last_payload_ts <= _now_ms()
+        # The PC clock is corrected; its next snapshot carries the real time.
+        await _post_events(hass, pair["token"], self._payload(_now_ms(), "303"))
+        assert acct.world == "303"
+
+    @pytest.mark.asyncio
+    async def test_devices_with_skewed_clocks_apply_in_arrival_order(self):
+        hass, store, pairing_store, fast = _paired(_make_hass_with_pairing())
+        slow = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+        await _post_events(hass, fast["token"], self._payload(_now_ms() + self.HOUR_MS, "302"))
+        await _post_events(hass, slow["token"], self._payload(_now_ms() - 60_000, "303"))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.world == "303"
+        # A device is still guarded against its own late resends.
+        await _post_events(hass, slow["token"], self._payload(_now_ms() - 120_000, "304"))
+        assert acct.world == "303"
+
+    @pytest.mark.asyncio
+    async def test_stale_resend_refreshes_presence(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302"))
+        acct = store.get_or_create(None, "PlayerOne")
+        acct.last_seen = datetime.now(timezone.utc) - timedelta(hours=1)
+        acct.is_online = False
+        acct.offline_reason = "timeout"
+
+        result = await _post_events(hass, pair["token"], self._payload(1_000, "999"))
+
+        assert result.status == 200
+        assert acct.world == "302"  # the stale snapshot itself is still skipped
+        assert acct.is_online is True
+        assert acct.offline_reason == "online"
+        assert datetime.now(timezone.utc) - acct.last_seen < timedelta(minutes=1)
+
+    @pytest.mark.asyncio
+    async def test_stale_resend_does_not_undo_logout(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302", [{"type": "LOGOUT"}]))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is False
+
+        await _post_events(hass, pair["token"], self._payload(1_000, "302"))
+
+        assert acct.is_online is False
+        assert acct.offline_reason == "logout"
+
+    @pytest.mark.asyncio
+    async def test_persisted_future_timestamp_cleared_on_load(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        store.load_dict([{
+            "account_hash": "playerone",
+            "player_name": "PlayerOne",
+            "world": "302",
+            "last_payload_ts": _now_ms() + self.DAY_MS,
+        }])
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.last_payload_ts is None
+
+        await _post_events(hass, pair["token"], self._payload(_now_ms(), "303"))
+        assert acct.world == "303"
+
+    @pytest.mark.asyncio
+    async def test_device_timestamps_survive_restart(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302"))
+
+        restarted = AccountStore()
+        restarted.load_dict(store.to_dict())
+        hass.data[DOMAIN]["test_entry"][DATA_ACCOUNT_STORE] = restarted
+        await _post_events(hass, pair["token"], self._payload(1_000, "999"))
+
+        assert restarted.get_or_create(None, "PlayerOne").world == "302"

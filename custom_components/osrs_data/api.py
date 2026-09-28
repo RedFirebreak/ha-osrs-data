@@ -333,13 +333,19 @@ class OsrsEventsView(HomeAssistantView):
                 )
                 if version:
                     acct.plugin_version = version
-                # A queued payload resent after a newer one must not roll
-                # the snapshot back; its events are still processed below.
-                if acct.is_stale(parsed.get("timestamp")):
+                # Any authenticated payload shows the client is alive, even
+                # a stale resend whose snapshot is skipped below.
+                acct.mark_seen()
+                # A queued payload resent after a newer one from the same
+                # device must not roll the snapshot back; its events are
+                # still processed below.
+                if acct.is_stale(parsed.get("timestamp"), device_id):
                     _LOGGER.debug("Skipping stale snapshot for %s", player_name)
                 else:
                     old_name = acct.player_name
-                    acct.update_player_data(parsed, player_name=player_name)
+                    acct.update_player_data(
+                        parsed, player_name=player_name, device_id=device_id
+                    )
                     if old_name != player_name:
                         # History is keyed by display name; carry it over.
                         history = entry_data.get(DATA_HISTORY_STORE)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -34,6 +35,23 @@ def _as_epoch_ms(value: Any) -> int | None:
     if value <= 0:
         return None
     return int(value)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _snapshot_ts(value: Any) -> int | None:
+    """Return a payload ``timestamp`` as epoch millis, clamped to now.
+
+    The timestamp comes from the player's PC clock.  Clamping keeps a
+    clock that runs ahead from storing a future time that would make
+    every later snapshot look stale.
+    """
+    ts = _as_epoch_ms(value)
+    if ts is None:
+        return None
+    return min(ts, _now_ms())
 
 
 def _level_from_xp(xp: int) -> int:
@@ -132,23 +150,39 @@ class AccountState:
         # Plugin version from the X-Osrs-Exporter-Version header
         self.plugin_version: str | None = None
 
-        # Root ``timestamp`` (epoch ms) of the newest applied snapshot.  The
-        # plugin can resend queued payloads late; older ones are not applied.
+        # Root ``timestamp`` (epoch ms, clamped to receive time) of the last
+        # applied snapshot.
         self.last_payload_ts: int | None = None
 
-    def is_stale(self, payload_ts: Any) -> bool:
-        """Return True if *payload_ts* is older than the last applied snapshot."""
-        ts = _as_epoch_ms(payload_ts)
-        return (
-            ts is not None
-            and self.last_payload_ts is not None
-            and ts < self.last_payload_ts
-        )
+        # Newest applied snapshot timestamp per paired device (device_id ->
+        # epoch ms).  The plugin can resend queued payloads late; older ones
+        # are not applied.  PC clocks differ, so a snapshot is only compared
+        # with snapshots from the same device.
+        self.device_payload_ts: dict[str, int] = {}
+
+    def is_stale(self, payload_ts: Any, device_id: str | None = None) -> bool:
+        """Return True if *payload_ts* is older than *device_id*'s last snapshot."""
+        ts = _snapshot_ts(payload_ts)
+        last = self.device_payload_ts.get(device_id or "")
+        return ts is not None and last is not None and ts < last
+
+    def mark_seen(self) -> None:
+        """Record that this account's client is sending data.
+
+        Called for every authenticated payload, including stale resends
+        whose snapshot is skipped, so presence never times out while data
+        is still arriving.  An explicit logout is not undone.
+        """
+        self.last_seen = datetime.now(timezone.utc)
+        if not self.is_online and self.offline_reason == "timeout":
+            self.is_online = True
+            self.offline_reason = "online"
 
     def update_player_data(
         self,
         parsed: dict[str, Any],
         player_name: str | None = None,
+        device_id: str | None = None,
     ) -> None:
         """Update from parsed base JSON player data."""
         if player_name:
@@ -158,9 +192,13 @@ class AccountState:
         self.last_update = now
         self.last_seen = datetime.now(timezone.utc)
 
-        payload_ts = _as_epoch_ms(parsed.get("timestamp"))
+        payload_ts = _snapshot_ts(parsed.get("timestamp"))
         if payload_ts is not None:
             self.last_payload_ts = payload_ts
+            key = device_id or ""
+            self.device_payload_ts[key] = max(
+                payload_ts, self.device_payload_ts.get(key, payload_ts)
+            )
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
@@ -361,6 +399,7 @@ class AccountState:
             "last_collection_log": self.last_collection_log,
             "plugin_version": self.plugin_version,
             "last_payload_ts": self.last_payload_ts,
+            "device_payload_ts": self.device_payload_ts,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -395,7 +434,18 @@ class AccountState:
         self.last_loot = data.get("last_loot", {})
         self.last_collection_log = data.get("last_collection_log", {})
         self.plugin_version = data.get("plugin_version")
-        self.last_payload_ts = _as_epoch_ms(data.get("last_payload_ts"))
+        # Older versions stored the timestamp unclamped; drop any future
+        # value so a PC clock that ran ahead can't block snapshots.
+        now_ms = _now_ms()
+        last_ts = _as_epoch_ms(data.get("last_payload_ts"))
+        self.last_payload_ts = last_ts if last_ts is not None and last_ts <= now_ms else None
+        self.device_payload_ts = {}
+        raw_device_ts = data.get("device_payload_ts")
+        if isinstance(raw_device_ts, dict):
+            for device_id, raw_ts in raw_device_ts.items():
+                ts = _as_epoch_ms(raw_ts)
+                if isinstance(device_id, str) and ts is not None and ts <= now_ms:
+                    self.device_payload_ts[device_id] = ts
 
 
 class AccountStore:
