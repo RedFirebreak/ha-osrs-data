@@ -1,0 +1,77 @@
+blueprint:
+  name: OSRS Data - Notify on event
+  description: >
+    Sends a notification when the OSRS Data integration fires an
+    osrs_data_event matching the chosen event_type. Optionally restrict by
+    account_name. The title and message are templates with full access to
+    the event payload via `trigger.event.data` (e.g.
+    `trigger.event.data.event_data.killerName`).
+
+  domain: automation
+
+  input:
+    event_type:
+      name: Event type
+      description: Which OSRS event should trigger the notification
+      selector:
+        select:
+          options:
+            - CLIENTSHUTDOWN
+            - DEATH
+            - LEVELUP
+            - LOOT
+            - PKLOOT
+            - SUPERIORSPAWN
+            - ACHIEVEMENTDIARY
+            - COMBATTASK
+
+    account_name:
+      name: Account name (optional)
+      description: Leave empty to trigger for any account. Must match trigger.event.data.account_name
+      default: ""
+      selector:
+        text: {}
+
+    notify_service:
+      name: Notify service
+      description: The notify service to call, e.g. notify.notify or notify.mobile_app_myphone
+      default: notify.notify
+      selector:
+        text: {}
+
+    title:
+      name: Notification title
+      default: "OSRS: {{ trigger.event.data.event_type }}"
+      selector:
+        template: {}
+
+    message:
+      name: Notification message
+      description: Template with access to trigger.event.data (account_name, event_type, event_data)
+      default: >-
+        {{ trigger.event.data.account_name }} — {{ trigger.event.data.event_type }}
+      selector:
+        template: {}
+
+mode: parallel
+max: 25
+
+trigger:
+  - platform: event
+    event_type: osrs_data_event
+    event_data:
+      event_type: !input event_type
+
+variables:
+  account_filter: !input account_name
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ account_filter == '' or (trigger.event.data.account_name | default('') == account_filter) }}
+
+action:
+  - service: !input notify_service
+    data:
+      title: !input title
+      message: !input message

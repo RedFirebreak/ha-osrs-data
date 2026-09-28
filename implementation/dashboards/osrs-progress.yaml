@@ -1,0 +1,275 @@
+# ─────────────────────────────────────────────────────────────────────
+# OSRS Data — "Player Progress" dashboard (rich edition)
+# ─────────────────────────────────────────────────────────────────────
+#
+# A modern, at-a-glance view of your RuneScape character: status, vitals,
+# combat/total level, XP trends over time, a full skills grid, recent
+# loot & deaths, and activity counters.
+#
+# ── Prerequisites (install via HACS → Frontend) ──────────────────────
+#   • Mushroom            (github.com/piitaya/lovelace-mushroom)
+#   • apexcharts-card     (github.com/RomRider/apexcharts-card)
+#   • auto-entities       (github.com/thomasloven/lovelace-auto-entities)
+# After installing, reload your browser (Ctrl+F5) so the new cards load.
+#
+# ── Targeting your character ─────────────────────────────────────────
+# Replace every "myrsn" below with YOUR account slug: your RuneScape name
+# lowercased with spaces/symbols turned into underscores.
+#   "Zezima"     → zezima
+#   "Lynx Titan" → lynx_titan
+# Find it in Developer Tools → States, filter for "sensor.osrs_".
+# (In your editor: Find & Replace  myrsn → your_slug.)
+#
+# The **Skills** and **Event counters** sections auto-discover their
+# sensors and need NO slug at all.
+#
+# ── Install ──────────────────────────────────────────────────────────
+# • UI:   New dashboard → ⋮ → "Edit in YAML" / raw config editor →
+#         paste the single view under `views:` (below).
+# • YAML: this whole file is already a valid dashboard — reference it from
+#         configuration.yaml under `lovelace: dashboards:` (see README).
+# ─────────────────────────────────────────────────────────────────────
+
+title: OSRS
+views:
+  - title: Progress
+    path: osrs
+    icon: mdi:sword-cross
+    type: sections
+    max_columns: 3
+    sections:
+      # ── Status & vitals ──────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Character
+            icon: mdi:account
+
+          - type: custom:mushroom-template-card
+            primary: "{{ states('sensor.osrs_myrsn_player_info') }}"
+            secondary: "Combat {{ states('sensor.osrs_myrsn_combat_level') }} · Total {{ states('sensor.osrs_myrsn_total_level') }}"
+            icon: mdi:sword-cross
+            icon_color: "{{ 'green' if is_state('binary_sensor.osrs_myrsn_online', 'on') else 'grey' }}"
+            multiline_secondary: true
+            fill_container: true
+            entity: sensor.osrs_myrsn_player_info
+            tap_action:
+              action: more-info
+
+          - type: custom:mushroom-chips-card
+            alignment: center
+            chips:
+              - type: entity
+                entity: binary_sensor.osrs_myrsn_online
+                icon: mdi:circle-medium
+                content_info: state
+              - type: entity
+                entity: sensor.osrs_myrsn_game_state
+                icon: mdi:gamepad-variant
+              - type: template
+                icon: mdi:earth
+                content: "W{{ state_attr('sensor.osrs_myrsn_player_info', 'world') }}"
+                entity: sensor.osrs_myrsn_player_info
+              - type: entity
+                entity: sensor.osrs_myrsn_location
+                icon: mdi:map-marker
+
+          - type: heading
+            heading: Vitals
+            icon: mdi:heart-pulse
+
+          - type: custom:mushroom-template-card
+            primary: Hitpoints
+            secondary: "{{ state_attr('sensor.osrs_myrsn_health', 'current') }} / {{ state_attr('sensor.osrs_myrsn_health', 'max') }}"
+            icon: mdi:heart
+            icon_color: "{{ 'red' if (state_attr('sensor.osrs_myrsn_health','current')|int(0)) < (state_attr('sensor.osrs_myrsn_health','max')|int(1) * 0.33) else 'orange' if (state_attr('sensor.osrs_myrsn_health','current')|int(0)) < (state_attr('sensor.osrs_myrsn_health','max')|int(1) * 0.66) else 'green' }}"
+            entity: sensor.osrs_myrsn_health
+
+          - type: custom:mushroom-template-card
+            primary: Prayer
+            secondary: "{{ state_attr('sensor.osrs_myrsn_prayer_points', 'current') }} / {{ state_attr('sensor.osrs_myrsn_prayer_points', 'max') }}"
+            icon: mdi:shield-sun
+            icon_color: "{{ 'red' if (state_attr('sensor.osrs_myrsn_prayer_points','current')|int(0)) < (state_attr('sensor.osrs_myrsn_prayer_points','max')|int(1) * 0.33) else 'amber' if (state_attr('sensor.osrs_myrsn_prayer_points','current')|int(0)) < (state_attr('sensor.osrs_myrsn_prayer_points','max')|int(1) * 0.66) else 'light-blue' }}"
+            entity: sensor.osrs_myrsn_prayer_points
+
+      # ── Progression ──────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Progression
+            icon: mdi:trending-up
+
+          - type: grid
+            columns: 2
+            square: false
+            cards:
+              - type: custom:mushroom-entity-card
+                entity: sensor.osrs_myrsn_combat_level
+                name: Combat
+                icon: mdi:sword
+                icon_color: red
+              - type: custom:mushroom-entity-card
+                entity: sensor.osrs_myrsn_total_level
+                name: Total
+                icon: mdi:star-four-points
+                icon_color: amber
+
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Total XP (last 7 days)
+              show_states: true
+            graph_span: 7d
+            span:
+              end: day
+            series:
+              - entity: sensor.osrs_myrsn_total_level
+                attribute: total_xp
+                name: Total XP
+                type: area
+                stroke_width: 2
+                float_precision: 0
+
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Total level (last 30 days)
+            graph_span: 30d
+            span:
+              end: day
+            series:
+              - entity: sensor.osrs_myrsn_total_level
+                name: Total level
+                type: line
+                stroke_width: 2
+
+      # ── Skills (auto-discovered — no slug needed) ────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Skills
+            icon: mdi:chart-box
+
+          # Skill sensors are the only OSRS sensors carrying an `xp`
+          # attribute, so we can list them all for any account without a
+          # slug. Skill names are the last segment of the entity id
+          # (all OSRS skills are single words).
+          - type: markdown
+            content: |
+              {% set ns = namespace(rows=[]) %}
+              {% for s in states.sensor %}
+                {%- if s.entity_id.startswith('sensor.osrs_')
+                       and 'xp' in s.attributes
+                       and not s.entity_id.endswith('_overall') %}
+                  {%- set ns.rows = ns.rows + [s] %}
+                {%- endif %}
+              {%- endfor %}
+              {% set skills = ns.rows | sort(attribute='entity_id') %}
+              {% if skills | length == 0 -%}
+              _No skill data yet — log in to your account so stats sync._
+              {%- else -%}
+              | Skill | Lvl | XP |
+              |---|--:|--:|
+              {% for s in skills -%}
+              | {{ s.entity_id.split('_')[-1] | capitalize }} | {{ s.state }} | {{ '{:,}'.format(s.attributes.xp | int(0)) }} |
+              {% endfor -%}
+              {%- endif %}
+
+      # ── Recent loot & deaths ─────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Recent activity
+            icon: mdi:history
+
+          - type: custom:mushroom-template-card
+            primary: "{{ states('sensor.osrs_myrsn_last_loot') }}"
+            secondary: "{{ '{:,}'.format(state_attr('sensor.osrs_myrsn_last_loot','total_value')|int(0)) }} gp"
+            icon: mdi:treasure-chest
+            icon_color: amber
+            entity: sensor.osrs_myrsn_last_loot
+
+          - type: markdown
+            content: |
+              {% set recent = state_attr('sensor.osrs_myrsn_last_loot', 'recent') or [] %}
+              {% if recent | length == 0 -%}
+              _No loot recorded yet._
+              {%- else -%}
+              | When | Source | Value |
+              |---|---|--:|
+              {% for e in recent -%}
+              | {{ (e.timestamp | as_datetime | as_local).strftime('%H:%M') if e.timestamp else '?' }} | {{ (e.data.source.text | default('?')) if e.data.source else '?' }} | {{ '{:,}'.format(e.data.totalValue | default(0) | int(0)) }} gp |
+              {% endfor -%}
+              {%- endif %}
+
+          - type: custom:mushroom-template-card
+            primary: "{% if states('sensor.osrs_myrsn_last_death') in ['unknown','unavailable','None',''] %}No deaths yet{% else %}Killed by {{ states('sensor.osrs_myrsn_last_death') }}{% endif %}"
+            secondary: "{{ '{:,}'.format(state_attr('sensor.osrs_myrsn_last_death','value_lost')|int(0)) }} gp lost"
+            icon: mdi:skull
+            icon_color: "{{ 'grey' if states('sensor.osrs_myrsn_last_death') in ['unknown','unavailable','None',''] else 'red' }}"
+            entity: sensor.osrs_myrsn_last_death
+
+          - type: markdown
+            content: |
+              {% set recent = state_attr('sensor.osrs_myrsn_last_death', 'recent') or [] %}
+              {% if recent | length == 0 -%}
+              _No deaths recorded yet._
+              {%- else -%}
+              | When | Killed by | Lost |
+              |---|---|--:|
+              {% for e in recent -%}
+              | {{ (e.timestamp | as_datetime | as_local).strftime('%H:%M') if e.timestamp else '?' }} | {{ e.data.killerName | default('Unknown') }} | {{ '{:,}'.format(e.data.valueLost | default(0) | int(0)) }} gp |
+              {% endfor -%}
+              {%- endif %}
+
+      # ── Activity counters (auto-discovered — no slug needed) ─────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Event counters
+            icon: mdi:counter
+
+          - type: custom:auto-entities
+            card:
+              type: glance
+              show_state: true
+              columns: 3
+            filter:
+              include:
+                - entity_id: sensor.osrs_*_total
+            sort:
+              method: friendly_name
+
+      # ── Gear & inventory ─────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Gear & bank
+            icon: mdi:bag-personal
+
+          - type: markdown
+            content: |
+              {% set slots = ['WEAPON','SHIELD','HEAD','BODY','LEGS','CAPE',
+                              'AMULET','GLOVES','BOOTS','RING','AMMO'] %}
+              {% set ns = namespace(any=false) %}
+              **Equipped**
+              {% for slot in slots -%}
+              {%- set item = state_attr('sensor.osrs_myrsn_equipment', slot) %}
+              {%- if item and item.name %}
+              {%- set ns.any = true %}
+              - **{{ slot | capitalize }}:** {{ item.name }}
+              {%- endif %}
+              {%- endfor %}
+              {% if not ns.any %}
+              _No equipment data yet._
+              {%- endif %}
+
+          - type: entities
+            title: Inventory
+            entities:
+              - entity: sensor.osrs_myrsn_inventory
+                name: Slots used
+              - type: attribute
+                entity: sensor.osrs_myrsn_inventory
+                attribute: slots_total
+                name: Slots total

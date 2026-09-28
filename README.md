@@ -60,7 +60,7 @@ The plugin receives a device-specific token and uses it for all future requests.
 
 Already have the integration set up and want to pair another computer?
 
-- **Options flow:** Go to **Settings → Integrations → OSRS Data → Configure** → enter a device name → get a new code
+- **Options flow:** Go to **Settings → Integrations → OSRS Data → Configure** → choose **Pair a new RuneLite client** → enter a device name → get a new code (the same menu also has **Edit integration settings**, see [Options](#options))
 - **Service:** Go to **Developer Tools → Services → `osrs_data.create_pairing_code`** → call it → a notification appears with the code
 
 Each pairing creates an independent device token. Existing tokens are never invalidated when new clients are added.
@@ -100,9 +100,14 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update` |
 | **Spellbook** | Active spellbook name | `id`, `last_update` |
 | **Game State** | RuneLite client game state | `last_update` |
+| **Total Level** | Sum of all skill levels | `total_xp`, `skill_count`, `last_update` |
+| **Combat Level** | Computed OSRS combat level | `last_update` |
+| **Last Death** | Killer name of the most recent death | `value_lost`, `danger`, `killer_name`, `killer_npc_id`, `kept_items`, `lost_items`, `location`, `timestamp`, `recent` |
+| **Last Loot** | Source of the most recent loot drop | `total_value`, `highest_value_item`, `items`, `source`, `type`, `npc_id`, `timestamp`, `recent` |
 | **\<Skill\> Level** *(per skill)* | Skill level | `xp`, `last_update` |
+| **\<EVENT\> Total** *(per event type)* | Cumulative event count | `last_fired` |
 
-Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account.
+Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death** and **Last Loot** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)).
 
 ### Game State Values
 
@@ -124,9 +129,39 @@ The **Game State** sensor reflects the RuneLite client's current state. Possible
 
 Account state, paired devices, and history are persisted to disk via Home Assistant's built-in store. All data survives HA restarts. A deferred save (5 s) batches rapid updates.
 
+### Event history
+
+Every game event (deaths, loot, level-ups, achievement diaries, combat tasks, …) is recorded into a persistent, per-account, per-type rolling buffer. Defaults keep the last **50 deaths**, **100 loot** drops, and **50** of every other type; these limits are configurable (see [Options](#options)).
+
+Query the history with the **`osrs_data.get_history`** service (returns a response):
+
+```yaml
+action: osrs_data.get_history
+data:
+  event_type: DEATH   # optional — omit for all types
+  account_name: myrsn # optional — omit for all accounts
+  limit: 20
+```
+
+The **Last Death** and **Last Loot** sensors also expose the most recent 10 entries via their `recent` attribute, so a dashboard can list them without calling a service (both example dashboards in [`implementation/dashboards/`](implementation/dashboards/) render these as recent loot/death tables).
+
+### Options
+
+Go to **Settings → Devices & services → OSRS Data → Configure → Edit integration settings** to tune:
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| Death history entries kept | 50 | Size of the DEATH history buffer |
+| Loot history entries kept | 100 | Size of the LOOT history buffer |
+| Default history entries kept | 50 | Buffer size for every other event type |
+| Deduplication window (seconds) | 30 | How long duplicate submissions/events are suppressed |
+| Presence timeout fallback (seconds) | 1500 | Offline threshold used when no `tickDelay` is known |
+
+Changing options reloads the integration so the new values take effect immediately.
+
 ### Event deduplication
 
-If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a 30-second window. Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `event_id` field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
+If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a configurable window (30 s by default). Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `event_id` field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
 
 ### Event types
 
@@ -457,15 +492,20 @@ The [`implementation/`](implementation/) folder contains ready-to-use Home Assis
 |----------|------|-------------|
 | Flash lights on event | Blueprint | Flashes selected lights when an OSRS event fires, with color/brightness options and automatic state restore |
 | Wave lights on event | Blueprint | Staggers (waves) light flashes one-by-one across multiple lights for a chase effect |
+| Notify on event | Blueprint | Sends a notification on a chosen OSRS event, with templated title/message |
+| Notify on valuable loot | Blueprint | Notifies when LOOT/PKLOOT `totalValue` meets a configurable threshold |
+| Low HP alert | Blueprint | Notifies (and optionally flashes a light red) when a Health sensor drops below a threshold |
 | Flash single light | Script | Helper script used by the wave blueprint to run a blink cycle on one light |
+| **Player Progress** | Dashboard | Rich player dashboard — status, vitals, XP-over-time charts, auto skills grid, recent loot/deaths (needs Mushroom + apexcharts-card + auto-entities from HACS) |
+| OSRS overview | Dashboard | Core-only Lovelace view (no custom cards) showing vitals, levels, gear, and recent deaths/loot |
 
-See the [implementation README](implementation/README.md) for full installation and usage instructions.
+See the [implementation README](implementation/README.md) for full installation and usage instructions, including the dashboard [prerequisites](implementation/README.md#installing-the-dashboards) and an optional multi-account dropdown.
 
 ## Project Structure
 
 ```
 custom_components/osrs_data/   # The integration itself
-implementation/                 # Blueprints & scripts for Home Assistant
+implementation/                 # Blueprints, scripts & dashboards for Home Assistant
 tests/                          # Automated test suite
 ```
 

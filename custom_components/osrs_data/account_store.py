@@ -19,14 +19,40 @@ def _normalize_player_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
+def _level_from_xp(xp: int) -> int:
+    """Return the real (unboosted) skill level for a given total XP.
+
+    Uses the standard OSRS experience formula, capped at level 99.
+    Deriving levels from XP is exactly how the game computes total and
+    combat level, so it is immune to boosted / virtual "levels" that a
+    client may report in the ``level`` field.
+    """
+    if not xp or xp <= 0:
+        return 1
+    points = 0
+    for level in range(1, 99):  # thresholds for levels 2..99
+        points += math.floor(level + 300 * (2 ** (level / 7.0)))
+        if math.floor(points / 4) > xp:
+            return level
+    return 99
+
+
 class AccountState:
     """Per-account player state and detail sensors."""
 
-    def __init__(self, account_hash: str, player_name: str) -> None:
+    def __init__(
+        self,
+        account_hash: str,
+        player_name: str,
+        presence_timeout: float = PRESENCE_TIMEOUT,
+    ) -> None:
         self.account_hash: str = account_hash
         self.player_name: str = player_name
         self.account_type: str | None = None
         self.world: str | None = None
+
+        # Fallback presence timeout (seconds) used when no tickDelay known.
+        self._presence_timeout_fallback: float = presence_timeout
 
         # Skills: {skill_name: {"xp": ..., "level": ...}}
         self.skills: dict[str, dict[str, Any]] = {}
@@ -70,6 +96,10 @@ class AccountState:
 
         # Event totals: {event_type: {"count": int, "last_fired": iso_str}}
         self.event_totals: dict[str, dict[str, Any]] = {}
+
+        # Most recent rich event payloads (data + timestamp), empty until seen
+        self.last_death: dict[str, Any] = {}
+        self.last_loot: dict[str, Any] = {}
 
     def update_player_data(
         self,
@@ -163,6 +193,57 @@ class AccountState:
             entry["count"] = entry.get("count", 0) + 1
             entry["last_fired"] = now
 
+    def record_game_event(self, event_type: str, data: dict[str, Any]) -> None:
+        """Record a game event: bump its counter and stash the rich payload.
+
+        DEATH/LOOT/PKLOOT payloads are stored (with a timestamp) so the
+        corresponding "Last …" sensors can surface killer, value lost,
+        loot total, etc.  All event types still bump the counter.
+        """
+        self.record_event(event_type)
+        if not isinstance(data, dict):
+            return
+        stamped = {**data, "timestamp": datetime.now(timezone.utc).isoformat()}
+        if event_type == "DEATH":
+            self.last_death = stamped
+        elif event_type in ("LOOT", "PKLOOT"):
+            self.last_loot = stamped
+
+    # ── Computed aggregates ─────────────────────────────────────────
+
+    @property
+    def total_level(self) -> int:
+        """Sum of all real skill levels (derived from XP, to match the game)."""
+        return sum(_level_from_xp(skill.get("xp", 0)) for skill in self.skills.values())
+
+    @property
+    def total_xp(self) -> int:
+        """Sum of all skill XP."""
+        return sum(skill.get("xp", 0) for skill in self.skills.values())
+
+    @property
+    def combat_level(self) -> int | None:
+        """OSRS combat level from real combat skill levels.
+
+        Levels are derived from XP so the result matches the game exactly
+        (boosted / virtual levels reported in the ``level`` field are
+        ignored).  Returns ``None`` until any skill data has arrived.
+        """
+        if not self.skills:
+            return None
+
+        def lvl(name: str) -> int:
+            skill = self.skills.get(name)
+            if not skill:
+                return 1
+            return _level_from_xp(skill.get("xp", 0))
+
+        base = 0.25 * (lvl("Defence") + lvl("Hitpoints") + math.floor(lvl("Prayer") / 2))
+        melee = 0.325 * (lvl("Attack") + lvl("Strength"))
+        ranged = 0.325 * math.floor(lvl("Ranged") * 3 / 2)
+        magic = 0.325 * math.floor(lvl("Magic") * 3 / 2)
+        return math.floor(base + max(melee, ranged, magic))
+
     @property
     def presence_timeout(self) -> float:
         """Compute the presence timeout in seconds.
@@ -175,7 +256,7 @@ class AccountState:
             return math.floor(
                 self.tick_delay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION
             )
-        return PRESENCE_TIMEOUT
+        return self._presence_timeout_fallback
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the account state to a dict for persistence."""
@@ -200,6 +281,8 @@ class AccountState:
             "offline_reason": self.offline_reason,
             "tick_delay": self.tick_delay,
             "event_totals": self.event_totals,
+            "last_death": self.last_death,
+            "last_loot": self.last_loot,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -227,14 +310,17 @@ class AccountState:
         self.offline_reason = data.get("offline_reason")
         self.tick_delay = data.get("tick_delay")
         self.event_totals = data.get("event_totals", {})
+        self.last_death = data.get("last_death", {})
+        self.last_loot = data.get("last_loot", {})
 
 
 class AccountStore:
     """In-memory store keyed by account identifier (fallback: playerName)."""
 
-    def __init__(self) -> None:
+    def __init__(self, presence_timeout: float = PRESENCE_TIMEOUT) -> None:
         self._by_hash: dict[str, AccountState] = {}
         self._by_name: dict[str, AccountState] = {}
+        self._presence_timeout = presence_timeout
 
     def get_or_create(
         self, account_hash: str | None, player_name: str
@@ -256,7 +342,11 @@ class AccountStore:
 
         # Brand-new account
         key = account_hash or norm
-        state = AccountState(account_hash=key, player_name=player_name)
+        state = AccountState(
+            account_hash=key,
+            player_name=player_name,
+            presence_timeout=self._presence_timeout,
+        )
         if account_hash:
             self._by_hash[account_hash] = state
         self._by_name[norm] = state

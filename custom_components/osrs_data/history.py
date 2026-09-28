@@ -36,12 +36,18 @@ class HistoryBuffer:
 class AccountHistory:
     """Per-account history grouped by event type."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        limits: dict[str, int] | None = None,
+        default_limit: int = DEFAULT_LIMIT,
+    ) -> None:
         self._buffers: dict[str, HistoryBuffer] = {}
+        self._limits = limits if limits is not None else DEFAULT_LIMITS
+        self._default_limit = default_limit
 
     def _get_buffer(self, event_type: str) -> HistoryBuffer:
         if event_type not in self._buffers:
-            maxlen = DEFAULT_LIMITS.get(event_type, DEFAULT_LIMIT)
+            maxlen = self._limits.get(event_type, self._default_limit)
             self._buffers[event_type] = HistoryBuffer(maxlen)
         return self._buffers[event_type]
 
@@ -84,12 +90,20 @@ class AccountHistory:
 class HistoryStore:
     """Multi-account history store with persistence support."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        limits: dict[str, int] | None = None,
+        default_limit: int = DEFAULT_LIMIT,
+    ) -> None:
         self._accounts: dict[str, AccountHistory] = {}
+        self._limits = limits if limits is not None else DEFAULT_LIMITS
+        self._default_limit = default_limit
 
     def get_or_create(self, account_key: str) -> AccountHistory:
         if account_key not in self._accounts:
-            self._accounts[account_key] = AccountHistory()
+            self._accounts[account_key] = AccountHistory(
+                self._limits, self._default_limit
+            )
         return self._accounts[account_key]
 
     def to_dict(self) -> dict[str, Any]:

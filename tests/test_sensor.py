@@ -62,6 +62,10 @@ from custom_components.osrs_data.sensor import (  # noqa: E402
     OsrsEquipmentSensor,
     OsrsAccountDetailSensor,
     OsrsGameStateSensor,
+    OsrsTotalLevelSensor,
+    OsrsCombatLevelSensor,
+    OsrsLastDeathSensor,
+    OsrsLastLootSensor,
 )
 
 
@@ -286,3 +290,86 @@ class TestOsrsGameStateSensor:
         sensor = OsrsGameStateSensor(entry, state, "hash1")
         attrs = sensor.extra_state_attributes
         assert "last_update" in attrs
+
+
+class TestOsrsLevelSensors:
+    """Tests for total level and combat level sensors (derived from XP)."""
+
+    # All seven combat skills at exactly level 99 (13,034,431 XP each).
+    _MAXED = {
+        s: {"xp": 13_034_431}
+        for s in (
+            "Attack",
+            "Strength",
+            "Defence",
+            "Hitpoints",
+            "Ranged",
+            "Prayer",
+            "Magic",
+        )
+    }
+
+    def test_total_level(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.skills = dict(self._MAXED)
+        sensor = OsrsTotalLevelSensor(entry, state, "hash1")
+        assert sensor.native_value == 99 * 7
+        assert sensor.extra_state_attributes["skill_count"] == 7
+
+    def test_combat_level(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.skills = dict(self._MAXED)
+        sensor = OsrsCombatLevelSensor(entry, state, "hash1")
+        assert sensor.native_value == 126  # max combat
+
+
+class TestOsrsLastEventSensors:
+    """Tests for the Last Death / Last Loot sensors."""
+
+    def test_last_death_none_until_event(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        sensor = OsrsLastDeathSensor(entry, state, "hash1")
+        assert sensor.native_value is None
+        # recent falls back to empty list without an attached hass
+        assert sensor.extra_state_attributes["recent"] == []
+
+    def test_last_death_populated(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.record_game_event("DEATH", {"killerName": "Guard", "valueLost": 88})
+        sensor = OsrsLastDeathSensor(entry, state, "hash1")
+        assert sensor.native_value == "Guard"
+        attrs = sensor.extra_state_attributes
+        assert attrs["value_lost"] == 88
+        assert sensor.unique_id == "hash1_last_death"
+
+    def test_last_loot_prefers_highest_value_item(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.record_game_event(
+            "LOOT",
+            {
+                "totalValue": 5_000_000,
+                "source": {"text": "Zulrah"},
+                "highestValueItem": {"name": "Tanzanite fang"},
+                "items": [{"name": "Snakeskin"}],
+            },
+        )
+        sensor = OsrsLastLootSensor(entry, state, "hash1")
+        # The notable item, not the NPC/source.
+        assert sensor.native_value == "Tanzanite fang"
+        assert sensor.extra_state_attributes["total_value"] == 5_000_000
+        # Source is still available as an attribute.
+        assert sensor.extra_state_attributes["source"] == {"text": "Zulrah"}
+
+    def test_last_loot_falls_back_to_item_then_source(self):
+        entry = _make_entry()
+        state = AccountState("hash1", "Player")
+        state.record_game_event(
+            "LOOT", {"items": [{"name": "Bones"}], "source": {"text": "Goblin"}}
+        )
+        sensor = OsrsLastLootSensor(entry, state, "hash1")
+        assert sensor.native_value == "Bones"

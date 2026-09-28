@@ -69,6 +69,28 @@ def _build_normalized_event(parsed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summarize_event(event_type: str, data: dict[str, Any]) -> str:
+    """Build a short human-readable summary for a history entry."""
+    if event_type == "DEATH":
+        killer = data.get("killerName") or "unknown"
+        lost = data.get("valueLost", 0)
+        return f"Died to {killer} (-{lost} gp)"
+    if event_type in ("LOOT", "PKLOOT"):
+        source = data.get("source")
+        src_text = source.get("text") if isinstance(source, dict) else None
+        total = data.get("totalValue", 0)
+        return f"{total} gp from {src_text or 'unknown source'}"
+    if event_type == "LEVELUP":
+        skill = data.get("skill")
+        level = data.get("level")
+        if skill is not None:
+            return f"{skill} reached level {level}"
+    name = data.get("name")
+    if name:
+        return f"{event_type}: {name}"
+    return event_type
+
+
 def _get_entry_data(hass: HomeAssistant) -> dict[str, Any] | None:
     """Get the first (and typically only) entry data dict.
 
@@ -242,16 +264,6 @@ class OsrsEventsView(HomeAssistantView):
                 acct = store.get_or_create(None, player_name)
                 acct.update_player_data(parsed, player_name=player_name)
 
-                # Record to history buffer
-                history_store = entry_data.get(DATA_HISTORY_STORE)
-                if history_store is not None:
-                    hist = history_store.get_or_create(account_id)
-                    hist.record(
-                        "DATA_UPDATE",
-                        f"Player data updated for {player_name}",
-                        parsed,
-                    )
-
                 async_dispatcher_send(
                     hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash
                 )
@@ -264,6 +276,7 @@ class OsrsEventsView(HomeAssistantView):
             # Fire individual HA events for each entry in the events list
             received_at = event_data["received_at"]
             event_dedupe = entry_data.get(DATA_EVENT_DEDUPE_CACHE)
+            history_store = entry_data.get(DATA_HISTORY_STORE)
             events_list = parsed.get("events", [])
             for ev in events_list:
                 if not isinstance(ev, dict):
@@ -274,15 +287,28 @@ class OsrsEventsView(HomeAssistantView):
                     player_name, ev
                 ):
                     continue
+                # Fire the bus event with the raw data untouched so the
+                # public event contract (list for LEVELUP, string for
+                # CLIENTSHUTDOWN, dict for DEATH/LOOT) is preserved.
+                ev_data = ev.get("data", {})
                 hass.bus.async_fire(EVENT_TYPE, {
                     "account_name": player_name,
                     "event_type": ev_type,
-                    "event_data": ev.get("data", {}),
+                    "event_data": ev_data,
                     "received_at": received_at,
                 })
-                # Update event totals on account state
+                # Internal state + history want a dict; wrap non-dict data.
+                ev_dict = ev_data if isinstance(ev_data, dict) else {"value": ev_data}
+                # Update event totals + rich "last …" state
                 if store is not None:
-                    acct.record_event(ev_type)
+                    acct.record_game_event(ev_type, ev_dict)
+                # Record the typed event into the per-account history buffer
+                if history_store is not None:
+                    history_store.get_or_create(account_id).record(
+                        ev_type,
+                        _summarize_event(ev_type, ev_dict),
+                        ev_dict,
+                    )
 
             return self.json({"ok": True})
         except Exception as exc:

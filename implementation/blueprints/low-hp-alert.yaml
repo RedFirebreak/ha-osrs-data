@@ -1,0 +1,75 @@
+blueprint:
+  name: OSRS Data - Low HP alert
+  description: >
+    Fires a notification (and optionally flashes a light) when a player's
+    Health sensor drops to or below a threshold. Point it at the per-account
+    "Health" sensor created by the OSRS Data integration
+    (e.g. sensor.osrs_<player>_health).
+
+  domain: automation
+
+  input:
+    health_sensor:
+      name: Health sensor
+      description: The OSRS Data "Health" sensor for the account to watch.
+      selector:
+        entity:
+          domain: sensor
+
+    threshold:
+      name: HP threshold
+      description: Alert when current HP is at or below this value.
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 99
+          mode: slider
+
+    notify_service:
+      name: Notify service
+      default: notify.notify
+      selector:
+        text: {}
+
+    message:
+      name: Notification message
+      default: >-
+        Low HP warning: {{ states(health_sensor) }} HP remaining!
+      selector:
+        template: {}
+
+    alert_light:
+      name: Alert light (optional)
+      description: Optional light to turn red as a visual warning.
+      default: ""
+      selector:
+        entity:
+          domain: light
+
+mode: single
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input health_sensor
+    below: !input threshold
+
+variables:
+  alert_light: !input alert_light
+
+action:
+  - service: !input notify_service
+    data:
+      title: "OSRS: Low HP!"
+      message: !input message
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ alert_light != '' }}"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: "{{ alert_light }}"
+            data:
+              rgb_color: [255, 0, 0]
+              brightness: 255

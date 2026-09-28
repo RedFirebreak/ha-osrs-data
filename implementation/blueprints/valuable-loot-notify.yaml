@@ -1,0 +1,89 @@
+blueprint:
+  name: OSRS Data - Notify on valuable loot
+  description: >
+    Sends a notification when a LOOT or PKLOOT event's totalValue meets or
+    exceeds a configurable threshold. Uses the rich event_data payload
+    (totalValue, source, highestValueItem). Optionally restrict by account.
+
+  domain: automation
+
+  input:
+    account_name:
+      name: Account name (optional)
+      description: Leave empty to trigger for any account.
+      default: ""
+      selector:
+        text: {}
+
+    min_value:
+      name: Minimum loot value (gp)
+      description: Only notify when totalValue is at least this many gp.
+      default: 10000
+      selector:
+        number:
+          min: 0
+          max: 100000000
+          step: 1000
+          mode: box
+
+    include_pk_loot:
+      name: Include PK loot
+      description: Also trigger on PKLOOT (player-kill loot), not just NPC loot.
+      default: true
+      selector:
+        boolean: {}
+
+    notify_service:
+      name: Notify service
+      default: notify.notify
+      selector:
+        text: {}
+
+    title:
+      name: Notification title
+      default: "OSRS: valuable drop!"
+      selector:
+        template: {}
+
+    message:
+      name: Notification message
+      default: >-
+        {{ trigger.event.data.account_name }} received
+        {{ trigger.event.data.event_data.totalValue | default(0) }} gp
+        {% if trigger.event.data.event_data.source is defined %}from
+        {{ trigger.event.data.event_data.source.text | default('unknown') }}{% endif %}.
+      selector:
+        template: {}
+
+mode: parallel
+max: 25
+
+trigger:
+  - platform: event
+    event_type: osrs_data_event
+
+variables:
+  account_filter: !input account_name
+  min_value: !input min_value
+  include_pk_loot: !input include_pk_loot
+
+condition:
+  # Only LOOT (and optionally PKLOOT) events
+  - condition: template
+    value_template: >-
+      {% set t = trigger.event.data.event_type | default('') %}
+      {{ t == 'LOOT' or (include_pk_loot and t == 'PKLOOT') }}
+  # Value threshold
+  - condition: template
+    value_template: >-
+      {{ (trigger.event.data.event_data.totalValue | default(0)) >= min_value }}
+  # Optional account filter
+  - condition: template
+    value_template: >-
+      {{ account_filter == '' or (trigger.event.data.account_name | default('') == account_filter) }}
+
+action:
+  - service: !input notify_service
+    data:
+      title: !input title
+      message: !input message

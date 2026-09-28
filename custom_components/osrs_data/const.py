@@ -34,3 +34,17 @@ TICK_DURATION = 0.6
 # timeout = floor(tickDelay * TICK_TIMEOUT_MULTIPLIER * TICK_DURATION)
 # 3.1x allows ~2 missed messages of grace before marking offline.
 TICK_TIMEOUT_MULTIPLIER = 3.1
+
+# ── Configurable options (stored in ConfigEntry.options) ────────────
+# Keys and their defaults.  Defaults preserve prior hardcoded behavior,
+# so an entry with no options behaves exactly as before.
+CONF_DEATH_LIMIT = "death_limit"
+CONF_LOOT_LIMIT = "loot_limit"
+CONF_DEFAULT_LIMIT = "default_limit"
+CONF_DEDUPE_TTL = "dedupe_ttl"
+CONF_PRESENCE_TIMEOUT = "presence_timeout"
+
+DEFAULT_DEATH_LIMIT = 50
+DEFAULT_LOOT_LIMIT = 100
+DEFAULT_HISTORY_LIMIT = 50
+DEFAULT_DEDUPE_TTL = 30
