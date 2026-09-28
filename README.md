@@ -40,7 +40,7 @@ After HACS / manual installation of the integration:
 5. In the **HA Exporter** RuneLite plugin, enter the code and your HA URL to pair
 6. Click **Submit** in Home Assistant — done!
 
-The plugin receives a device-specific token and uses it for all future requests.
+The plugin receives a device-specific token and uses it for all future requests. The pair response also includes your Home Assistant location name (Settings → System → General), which the plugin uses as the connection's default name.
 
 ## Configuring the HA Exporter RuneLite plugin
 1. Install **[HA Exporter](https://github.com/xXD4rkDragonXx/runelite-homeassistant-data-exporter)** from the RuneLite Plugin Hub.
@@ -84,6 +84,14 @@ DELETE /api/osrs-data/devices/{device_id}
 | `GET /api/osrs-data/devices` | HA auth | List paired devices |
 | `DELETE /api/osrs-data/devices/{id}` | HA auth | Revoke a device |
 
+Responses follow the plugin's delivery rules:
+
+- A revoked or unknown token returns `401`, and the plugin disables that connection.
+- Malformed payloads return `400`, and the plugin drops them without retrying.
+- While the integration isn't ready, requests return `503` with `Retry-After: 60`, and the plugin pauses and retries.
+
+The plugin sends its version in an `X-Osrs-Exporter-Version` header. It is shown as the account device's firmware (`sw_version`), in the Player Info `plugin_version` attribute, and in the device list (`plugin_version`, `last_seen`).
+
 ## Features
 
 ### Sensors
@@ -92,7 +100,7 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 
 | Sensor | State | Key Attributes |
 |--------|-------|----------------|
-| **Player Info** | Player name | `display_name`, `previous_names`, `account_type`, `world`, `world_types`, `last_update`, `events` |
+| **Player Info** | Player name | `display_name`, `previous_names`, `account_type`, `world`, `world_types`, `last_update`, `plugin_version`, `events` |
 | **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28) |
 | **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
 | **Health** | Current HP | `current`, `max`, `last_update` |
@@ -104,12 +112,15 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **Combat Level** | Computed OSRS combat level | `last_update` |
 | **Last Death** | Killer name of the most recent death | `value_lost`, `danger`, `killer_name`, `killer_npc_id`, `kept_items`, `lost_items`, `location`, `timestamp`, `recent` |
 | **Last Loot** | Source of the most recent loot drop | `total_value`, `highest_value_item`, `items`, `source`, `type`, `npc_id`, `timestamp`, `recent` |
+| **Last Collection Log** | Most recent new collection log item | `item_id` (`null` if unknown), `value`, `kill_count`, `timestamp`, `recent` |
 | **\<Skill\> Level** *(per skill)* | Skill level | `xp`, `last_update` |
 | **\<EVENT\> Total** *(per event type)* | Cumulative event count | `last_fired` |
 
-Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death** and **Last Loot** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)).
+Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death**, **Last Loot** and **Last Collection Log** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)). Their `timestamp` is when the event happened in game (the plugin's event timestamp), not when Home Assistant received it.
 
-On special worlds (Leagues/`SEASONAL`, `DEADMAN`, `BETA_WORLD`, `TOURNAMENT_WORLD`, `QUEST_SPEEDRUNNING`, `NOSAVE_MODE`, `PVP_ARENA`) skill, Total Level and Combat Level sensors are **not** updated, so those separate stats never overwrite your main-game values. Live sensors (health, world, location, online status, …) keep updating.
+Collection log events only arrive when the in-game setting **Collection log – New addition notification** is on (chat or popup).
+
+The HA Exporter plugin sends nothing from special worlds unless its **Send data from special worlds** setting is on. When it is on, on special worlds (Leagues/`SEASONAL`, `DEADMAN`, `BETA_WORLD`, `TOURNAMENT_WORLD`, `QUEST_SPEEDRUNNING`, `NOSAVE_MODE`, `PVP_ARENA`) skill, Total Level and Combat Level sensors are **not** updated, so those separate stats never overwrite your main-game values. Live sensors (health, world, location, online status, …) keep updating.
 
 **Name changes:** when the HA Exporter plugin sends its stable `accountHash`, a renamed account stays on the same device and entities: entity IDs, statistics and event history carry over, and the old name is listed in `previous_names`. Accounts that existed before this version keep their original entity IDs; the hash is linked the first time the plugin reports it. If an account is renamed *before* it has sent data with a hash even once, it shows up as a new device (the same as in older versions).
 
@@ -135,7 +146,7 @@ Account state, paired devices, and history are persisted to disk via Home Assist
 
 ### Event history
 
-Every game event (deaths, loot, level-ups, achievement diaries, combat tasks, …) is recorded into a persistent, per-account, per-type rolling buffer. Defaults keep the last **50 deaths**, **100 loot** drops, and **50** of every other type; these limits are configurable (see [Options](#options)).
+Every game event (deaths, loot, level-ups, collection log items, achievement diaries, combat tasks, …) is recorded into a persistent, per-account, per-type rolling buffer. Defaults keep the last **50 deaths**, **100 loot** drops, and **50** of every other type; these limits are configurable (see [Options](#options)).
 
 Query the history with the **`osrs_data.get_history`** service (returns a response):
 
@@ -158,14 +169,21 @@ Go to **Settings → Devices & services → OSRS Data → Configure → Edit int
 | Death history entries kept | 50 | Size of the DEATH history buffer |
 | Loot history entries kept | 100 | Size of the LOOT history buffer |
 | Default history entries kept | 50 | Buffer size for every other event type |
-| Deduplication window (seconds) | 30 | How long duplicate submissions/events are suppressed |
+| Deduplication window (seconds) | 30 | How long duplicate submissions and events without an `eventId` are suppressed |
 | Presence timeout fallback (seconds) | 1500 | Offline threshold used when no `tickDelay` is known |
 
 Changing options reloads the integration so the new values take effect immediately.
 
 ### Event deduplication
 
-If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a configurable window (30 s by default). Distinct data updates always pass through. Individual events within each payload are also deduplicated — if an event carries an `eventId` (or legacy `event_id`) field it is used directly; otherwise a composite signature is built from the account, event type, and event data.
+If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a configurable window (30 s by default). Distinct data updates always pass through.
+
+Individual events within each payload are also deduplicated:
+
+- If an event carries an `eventId` (or legacy `event_id`), that ID is the key. It is remembered for 15 minutes, because the plugin can queue and resend events for up to 10 minutes while it backs off.
+- Otherwise a composite signature of account, event type and event data is used, with the configurable window.
+
+The plugin also stamps every payload with a `timestamp`. When it resends an older queued payload after a newer one has arrived, the older snapshot is not applied, so inventory, skills and presence never roll back. Its events are still processed.
 
 ### Event types
 
@@ -181,6 +199,7 @@ The HA Exporter plugin sends events in the `events[]` array of each payload. The
 | `superiorSpawn` | `SUPERIORSPAWN` | Superior slayer monster spawned (`name`, `npcId`, `location`) |
 | `achievementDiary` | `ACHIEVEMENTDIARY` | Achievement diary task/tier completed |
 | `combatTask` | `COMBATTASK` | Combat Achievement task completed |
+| `collectionLog` | `COLLECTIONLOG` | New collection log item (`itemName`, `itemId` (`-1` if unknown), `value`, optional `killCount`) |
 
 Each event type also creates a counter sensor (e.g. `sensor.<account>_death_total`) that tracks the total number of events received and exposes a `last_fired` attribute.
 
@@ -385,9 +404,13 @@ The integration fires `osrs_data_event` on the Home Assistant event bus. There a
   "account_name": "YourRSN",
   "event_type": "DEATH",
   "event_data": { "killerName": "Guard", "valueLost": 88 },
+  "event_id": "3f2c9a4e-8d1b-4c6e-9f0a-2b7d5e1c8a90",
+  "occurred_at": "2025-01-15T12:34:50+00:00",
   "received_at": "2025-01-15T12:34:56+00:00"
 }
 ```
+
+`event_id` is the plugin's unique ID for the event (`null` for older plugin versions). `occurred_at` is when it happened in game; it can be earlier than `received_at` when the plugin had to queue the event.
 
 ### Example: announce world change
 
