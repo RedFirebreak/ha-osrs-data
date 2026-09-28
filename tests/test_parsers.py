@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 # Mock homeassistant before imports
 for mod_name in (
@@ -503,3 +506,142 @@ class TestNewPluginFields:
             result = parse({"player": {"name": "P", "accountHash": bad}})
             assert result is not None
             assert result["accountHash"] is None
+
+
+# ── Wrong types (valid JSON, wrong shape) ───────────────────────────
+
+
+FUZZ_BASE: dict[str, Any] = {
+    "player": {
+        "name": "PlayerOne",
+        "accountType": "0",
+        "world": "302",
+        "stats": {"skills": {"Attack": {"xp": 737627, "level": 60}}},
+        "inventory": {"items": [
+            {"id": 385, "name": "Shark", "gePrice": 800, "haPrice": 600, "quantity": 10},
+        ]},
+        "equipment": {"items": [
+            {"id": 6570, "name": "Fire cape", "quantity": 1, "equipmentSlot": "CAPE"},
+        ]},
+        "health": {"current": 75, "max": 99},
+        "prayerPoints": {"current": 43, "max": 43},
+        "location": {"x": 3200, "y": 3200, "plane": 0},
+        "spellbook": {"id": 0, "name": "standard"},
+        "worldTypes": ["MEMBERS"],
+        "accountHash": "e" * 56,
+    },
+    "events": [{
+        "type": "death",
+        "eventId": "fuzz-1",
+        "timestamp": 1_700_000_000_000,
+        "data": {"killerName": "Jad"},
+    }],
+    "tickDelay": 20,
+    "state": "LOGGED_IN",
+    "timestamp": 1_700_000_000_000,
+}
+
+_ITEM = ("player", "inventory", "items", 0)
+_SLOT = ("player", "equipment", "items", 0)
+FUZZ_PATHS: list[tuple] = [
+    ("player", "accountType"), ("player", "world"),
+    ("player", "stats"), ("player", "stats", "skills"),
+    ("player", "stats", "skills", "Attack"),
+    ("player", "stats", "skills", "Attack", "xp"),
+    ("player", "stats", "skills", "Attack", "level"),
+    ("player", "inventory"), ("player", "inventory", "items"), _ITEM,
+    (*_ITEM, "id"), (*_ITEM, "name"), (*_ITEM, "gePrice"), (*_ITEM, "quantity"),
+    ("player", "equipment"), ("player", "equipment", "items"), _SLOT,
+    (*_SLOT, "equipmentSlot"), (*_SLOT, "name"),
+    ("player", "health"), ("player", "health", "current"),
+    ("player", "prayerPoints"), ("player", "prayerPoints", "max"),
+    ("player", "location"), ("player", "location", "x"),
+    ("player", "spellbook"), ("player", "spellbook", "id"), ("player", "spellbook", "name"),
+    ("player", "worldTypes"), ("player", "accountHash"),
+    ("events",), ("events", 0), ("events", 0, "type"), ("events", 0, "data"),
+    ("events", 0, "eventId"), ("events", 0, "timestamp"),
+    ("tickDelay",), ("state",), ("timestamp",),
+]
+FUZZ_VALUES: list[Any] = [None, True, 7, -1.5, "junk", [], [1, "x"], {}, {"k": "v"}]
+
+
+def fuzzed(path: tuple, value: Any) -> dict[str, Any]:
+    """Return a copy of FUZZ_BASE with the value at *path* replaced."""
+    payload = copy.deepcopy(FUZZ_BASE)
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    return payload
+
+
+class TestWrongTypesAreSkipped:
+    """A wrong type skips that section or field; the parser never raises."""
+
+    @pytest.mark.parametrize("path", FUZZ_PATHS, ids=lambda p: ".".join(map(str, p)))
+    def test_parse_never_raises(self, path):
+        for value in FUZZ_VALUES:
+            result = parse(fuzzed(path, value))
+            assert result is not None
+            assert result["name"] == "PlayerOne"
+
+    def test_null_equipment_slot_skips_only_that_item(self):
+        result = parse({"player": {"name": "P", "equipment": {"items": [
+            {"name": "Mystery", "equipmentSlot": None},
+            {"name": "Fire cape", "equipmentSlot": "CAPE"},
+        ]}}})
+        assert result["equipment"]["CAPE"]["name"] == "Fire cape"
+        assert sum(1 for item in result["equipment"].values() if item) == 1
+
+    def test_skills_as_list_are_skipped(self):
+        result = parse({"player": {"name": "P", "stats": {"skills": [{"xp": 1}]}}})
+        assert result["skills"] == {}
+
+    def test_non_numeric_skill_skipped(self):
+        result = parse({"player": {"name": "P", "stats": {"skills": {
+            "Attack": {"xp": "lots", "level": 60},
+            "Strength": {"xp": 100, "level": None},
+            "Defence": {"xp": 100, "level": 2},
+        }}}})
+        assert result["skills"] == {"Defence": {"xp": 100, "level": 2}}
+
+    def test_inventory_items_as_object_skip_section(self):
+        result = parse({"player": {"name": "P", "inventory": {"items": {"0": {"name": "Shark"}}}}})
+        assert "inventory" not in result
+
+    def test_wrong_item_fields_fall_back_to_defaults(self):
+        result = parse({"player": {"name": "P", "inventory": {"items": [
+            {"id": "385", "name": 5, "gePrice": "800", "haPrice": None, "quantity": True},
+        ]}}})
+        assert result["inventory"] == [
+            {"id": None, "name": "", "gePrice": 0, "haPrice": 0, "quantity": 0}
+        ]
+
+    def test_section_of_wrong_type_is_skipped(self):
+        for section in ("inventory", "equipment", "health", "prayerPoints", "location", "spellbook"):
+            for bad in ("x", 5, [1], True):
+                result = parse({"player": {"name": "P", section: bad}})
+                assert section not in result, (section, bad)
+
+    def test_wrong_field_type_skips_section(self):
+        cases = {
+            "health": {"current": "full", "max": 99},
+            "prayerPoints": {"current": 1, "max": [1]},
+            "location": {"x": 1, "y": None, "plane": 0},
+            "spellbook": {"id": "3", "name": "arceuus"},
+        }
+        for section, bad in cases.items():
+            assert section not in parse({"player": {"name": "P", section: bad}}), section
+
+    def test_scalars_of_wrong_type_use_defaults(self):
+        result = parse({
+            "player": {"name": "P", "accountType": ["x"], "world": {"id": 1}},
+            "tickDelay": True,
+        })
+        assert result["accountType"] == "normal"
+        assert result["world"] is None
+        assert result["tickDelay"] is None
+
+    def test_name_must_be_a_non_blank_string(self):
+        for bad in (7, True, ["P"], {"n": "P"}, "   "):
+            assert parse({"player": {"name": bad}}) is None, bad

@@ -11,7 +11,6 @@ STORAGE_KEY = f"{DOMAIN}_store"
 # Data key for the per-entry AccountStore kept in hass.data
 DATA_ACCOUNT_STORE = "account_store"
 DATA_HISTORY_STORE = "history_store"
-DATA_DEDUPE_CACHE = "dedupe_cache"
 DATA_STORE = "store"
 DATA_PAIRING_STORE = "pairing_store"
 DATA_EVENT_DEDUPE_CACHE = "event_dedupe_cache"

@@ -51,7 +51,6 @@ from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
 from custom_components.osrs_data.api import OsrsEventsView  # noqa: E402
 from custom_components.osrs_data.const import (  # noqa: E402
     DATA_ACCOUNT_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_HISTORY_STORE,
     DATA_PAIRING_STORE,
@@ -59,7 +58,7 @@ from custom_components.osrs_data.const import (  # noqa: E402
     DOMAIN,
     SIGNAL_ACCOUNT_UPDATED,
 )
-from custom_components.osrs_data.dedupe import DedupeCache, EventDedupeCache  # noqa: E402
+from custom_components.osrs_data.dedupe import EventDedupeCache  # noqa: E402
 from custom_components.osrs_data.history import HistoryStore  # noqa: E402
 from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
 
@@ -130,7 +129,6 @@ def _setup_hass_and_token():
             entry_id: {
                 DATA_ACCOUNT_STORE: store,
                 DATA_HISTORY_STORE: HistoryStore(),
-                DATA_DEDUPE_CACHE: DedupeCache(),
                 DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(),
                 DATA_PAIRING_STORE: pairing_store,
                 DATA_STORE: mock_storage,

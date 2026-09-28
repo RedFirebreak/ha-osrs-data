@@ -22,7 +22,6 @@ from .const import (
     DOMAIN,
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
@@ -40,7 +39,7 @@ from .const import (
     PRESENCE_TIMEOUT,
     SIGNAL_ACCOUNT_UPDATED,
 )
-from .dedupe import DedupeCache, EventDedupeCache
+from .dedupe import EventDedupeCache
 from .history import HistoryStore
 from .pairing import PairingStore
 from .storage import get_store
@@ -110,7 +109,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
-        DATA_DEDUPE_CACHE: DedupeCache(ttl=dedupe_ttl),
         DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(ttl=dedupe_ttl),
         DATA_PAIRING_STORE: pairing_store,
         DATA_STORE: store,

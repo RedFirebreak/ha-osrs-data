@@ -59,16 +59,16 @@ from custom_components.osrs_data.api import (  # noqa: E402
 from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
 from custom_components.osrs_data.const import (  # noqa: E402
     DATA_ACCOUNT_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_HISTORY_STORE,
     DATA_PAIRING_STORE,
     DATA_STORE,
     DOMAIN,
 )
-from custom_components.osrs_data.dedupe import DedupeCache, EventDedupeCache  # noqa: E402
+from custom_components.osrs_data.dedupe import EventDedupeCache  # noqa: E402
 from custom_components.osrs_data.history import HistoryStore  # noqa: E402
 from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
+from tests.test_parsers import FUZZ_PATHS, FUZZ_VALUES, fuzzed  # noqa: E402
 
 
 # ── Sample payloads ──────────────────────────────────────────────────
@@ -113,7 +113,6 @@ def _make_hass_with_pairing():
             entry_id: {
                 DATA_ACCOUNT_STORE: store,
                 DATA_HISTORY_STORE: HistoryStore(),
-                DATA_DEDUPE_CACHE: DedupeCache(),
                 DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(),
                 DATA_PAIRING_STORE: pairing_store,
                 DATA_STORE: mock_storage,
@@ -303,26 +302,44 @@ class TestOsrsEventsView:
         mock_storage.async_delay_save.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_events_deduplication(self):
-        """Duplicate events are detected."""
+    async def test_identical_resend_fires_each_event_once(self):
+        """A resent payload is processed again; its events are deduped by id."""
         hass, _, pairing_store, _ = _make_hass_with_pairing()
         code = pairing_store.create_pairing_code()
         pair_result = pairing_store.consume_pairing_code(code)
         token = pair_result["token"]
+        payload = {
+            **BASE_PAYLOAD,
+            "events": [{"type": "death", "eventId": "dup-1", "data": {"killerName": "Jad"}}],
+        }
 
         view = OsrsEventsView()
         r1 = await view.post(
-            _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token})
+            _make_json_request(hass, payload, headers={"X-Osrs-Token": token})
         )
         r2 = await view.post(
-            _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token})
+            _make_json_request(hass, payload, headers={"X-Osrs-Token": token})
         )
 
-        body1 = json.loads(r1.body)
-        body2 = json.loads(r2.body)
-        assert body1["ok"] is True
-        assert body2["ok"] is True
-        assert body2.get("duplicate") is True
+        assert json.loads(r1.body) == {"ok": True}
+        assert json.loads(r2.body) == {"ok": True}
+        fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
+        assert [f.get("event_type") for f in fired].count("DEATH") == 1
+
+    @pytest.mark.asyncio
+    async def test_identical_heartbeat_refreshes_presence(self):
+        """Older plugins send no timestamp, so an idle heartbeat is identical."""
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        pair = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+        view = OsrsEventsView()
+        headers = {"X-Osrs-Token": pair["token"]}
+        await view.post(_make_json_request(hass, BASE_PAYLOAD, headers=headers))
+        acct = store.get_or_create(None, "PlayerOne")
+        acct.last_seen = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        await view.post(_make_json_request(hass, BASE_PAYLOAD, headers=headers))
+
+        assert datetime.now(timezone.utc) - acct.last_seen < timedelta(minutes=1)
 
 
 class TestEventsAccountHash:
@@ -692,6 +709,48 @@ class TestBadInputIs4xx:
         assert result.status == 200
         fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
         assert any(f.get("event_type") == "DEATH" for f in fired)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", FUZZ_PATHS, ids=lambda p: ".".join(map(str, p)))
+    async def test_wrong_types_never_return_5xx(self, path):
+        for value in FUZZ_VALUES:
+            hass, store, _, pair = _paired(_make_hass_with_pairing())
+            result = await _post_events(hass, pair["token"], fuzzed(path, value))
+            assert result.status == 200, (value, result.body)
+            for acct in store.accounts:
+                # What the sensors compute must work on whatever was stored.
+                assert acct.total_level >= 0
+                acct.combat_level  # noqa: B018
+
+    @pytest.mark.asyncio
+    async def test_unusable_player_returns_400(self):
+        for bad in (7, True, ["P"], {"n": "P"}, "   "):
+            hass, store, _, pair = _paired(_make_hass_with_pairing())
+            result = await _post_events(hass, pair["token"], {"player": {"name": bad}})
+            assert result.status == 400, bad
+            assert store.accounts == []
+
+    @pytest.mark.asyncio
+    async def test_retry_after_failure_is_processed(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        payload = {
+            "player": {"name": "PlayerOne"},
+            "events": [{"type": "death", "eventId": "retry-1", "data": {"killerName": "Jad"}}],
+            "timestamp": 1_000,
+        }
+        # A transient failure while handling the payload -> 500, so the
+        # plugin retries it.
+        hass.bus.async_fire.side_effect = [RuntimeError("bus unavailable")] + [None] * 10
+        first = await _post_events(hass, pair["token"], payload)
+        assert first.status == 500
+
+        retry = await _post_events(hass, pair["token"], payload)
+
+        assert retry.status == 200
+        assert "duplicate" not in json.loads(retry.body)
+        fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
+        assert any(f.get("event_type") == "DEATH" for f in fired)
+        assert store.get_or_create(None, "PlayerOne").event_totals["DEATH"]["count"] == 1
 
     @pytest.mark.asyncio
     async def test_pair_non_string_code_returns_400(self):

@@ -25,7 +25,6 @@ from .const import (
     EVENT_TYPE,
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
@@ -317,11 +316,9 @@ class OsrsEventsView(HomeAssistantView):
             player_name = parsed["name"]
             account_id = player_name
 
-            # Dedupe check
-            dedupe = entry_data.get(DATA_DEDUPE_CACHE)
-            if dedupe is not None and dedupe.is_duplicate(account_id, payload):
-                _LOGGER.debug("Dropping duplicate data for %s", account_id)
-                return self.json({"ok": True, "duplicate": True})
+            # No payload-level dedupe: a resent payload is processed again.
+            # Its snapshot is idempotent (and guarded against rolling back
+            # by is_stale), and each event is deduped by its eventId below.
 
             # The plugin's accountHash (when sent) is a lookup alias so a
             # renamed account resolves to its existing device/entities.
@@ -381,9 +378,16 @@ class OsrsEventsView(HomeAssistantView):
             _schedule_save(entry_data)
 
             return self.json({"ok": True})
-        except Exception as exc:
-            _LOGGER.exception("Event handling failed: %s", exc)
-            return self.json({"ok": False, "error": str(exc)}, status_code=500)
+        except Exception:  # noqa: BLE001
+            # The parser turns bad input into a 400 or skips it, so this is
+            # an internal failure.  A 5xx makes the plugin retry the payload;
+            # the retry is processed in full, except events that were
+            # already handled (deduped by eventId).
+            _LOGGER.exception("Event handling failed")
+            return self.json(
+                {"ok": False, "error": "Internal error while processing the data"},
+                status_code=500,
+            )
 
     @staticmethod
     def _handle_event(

@@ -1,8 +1,16 @@
-"""Parser for the base Runelite plugin JSON structure."""
+"""Parser for the base Runelite plugin JSON structure.
+
+The payload is untrusted input: a value of the wrong type skips that
+section or field (with a debug log) instead of raising, so bad input can
+never turn into a 5xx that the plugin would retry.
+"""
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 
 EQUIPMENT_SLOTS: tuple[str, ...] = (
@@ -21,99 +29,156 @@ EQUIPMENT_SLOTS: tuple[str, ...] = (
 )
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _skip(what: str, value: Any) -> None:
+    _LOGGER.debug("Skipping %s: unexpected %s", what, type(value).__name__)
+
+
+def _parse_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one inventory/equipment item; wrong-typed fields get defaults."""
+    item_id = item.get("id")
+    name = item.get("name", "")
+    parsed: dict[str, Any] = {
+        "id": item_id if _is_int(item_id) else None,
+        "name": name if isinstance(name, str) else "",
+    }
+    for field in ("gePrice", "haPrice", "quantity"):
+        value = item.get(field, 0)
+        parsed[field] = value if _is_number(value) else 0
+    return parsed
+
+
+def _parse_items(section: str, data: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Return the section's item objects, or None if ``items`` isn't a list."""
+    items = data.get("items", [])
+    if not isinstance(items, list):
+        _skip(f"{section} items", items)
+        return None
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _parse_numbers(
+    section: str, data: Any, fields: tuple[str, ...]
+) -> dict[str, Any] | None:
+    """Return *fields* of an object section (missing ones are 0).
+
+    Returns None, skipping the whole section, if it isn't an object or
+    any field isn't a number.
+    """
+    if not isinstance(data, dict):
+        _skip(section, data)
+        return None
+    result = {field: data.get(field, 0) for field in fields}
+    for field, value in result.items():
+        if not _is_number(value):
+            _skip(f"{section} ({field})", value)
+            return None
+    return result
+
+
 def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Parse a base JSON payload from the Runelite plugin.
 
     Returns a normalized dict with player data, or *None* if the payload
-    is missing the required ``player`` key.
+    has no usable ``player`` (an object with a non-blank string ``name``).
+    A section of the wrong shape (inventory, equipment, health,
+    prayerPoints, location, spellbook) is left out of the result.
     """
     player = payload.get("player")
     if not player or not isinstance(player, dict):
         return None
 
     name = player.get("name")
-    if not name:
+    if not isinstance(name, str) or not name.strip():
         return None
     account_type = player.get("accountType", "normal")
+    if not isinstance(account_type, (str, int)) or isinstance(account_type, bool):
+        _skip("accountType", account_type)
+        account_type = "normal"
     world = player.get("world")
+    if not isinstance(world, (str, int)) or isinstance(world, bool):
+        if world is not None:
+            _skip("world", world)
+        world = None
+
+    result: dict[str, Any] = {}
 
     # ── Skills ───────────────────────────────────────────────────────
     skills: dict[str, dict[str, Any]] = {}
     stats = player.get("stats", {})
     raw_skills = stats.get("skills", {}) if isinstance(stats, dict) else {}
+    if not isinstance(raw_skills, dict):
+        _skip("skills", raw_skills)
+        raw_skills = {}
     for skill_name, skill_data in raw_skills.items():
-        if isinstance(skill_data, dict):
-            skills[skill_name] = {
-                "xp": skill_data.get("xp", 0),
-                "level": skill_data.get("level", 1),
-            }
+        if not isinstance(skill_data, dict):
+            _skip(f"skill {skill_name}", skill_data)
+            continue
+        xp = skill_data.get("xp", 0)
+        level = skill_data.get("level", 1)
+        if not _is_number(xp) or not _is_number(level):
+            _skip(f"skill {skill_name}", xp if not _is_number(xp) else level)
+            continue
+        skills[skill_name] = {"xp": xp, "level": level}
 
     # ── Inventory (max 28 slots) ─────────────────────────────────────
-    inventory: list[dict[str, Any]] = []
-    inv_data = player.get("inventory", {})
-    inv_items = inv_data.get("items", []) if isinstance(inv_data, dict) else []
-    for item in inv_items[:28]:
-        if isinstance(item, dict):
-            inventory.append({
-                "id": item.get("id"),
-                "name": item.get("name", ""),
-                "gePrice": item.get("gePrice", 0),
-                "haPrice": item.get("haPrice", 0),
-                "quantity": item.get("quantity", 0),
-            })
+    inv_data = player.get("inventory")
+    if inv_data is None:
+        result["inventory"] = []
+    elif not isinstance(inv_data, dict):
+        _skip("inventory", inv_data)
+    elif (inv_items := _parse_items("inventory", inv_data)) is not None:
+        result["inventory"] = [_parse_item(item) for item in inv_items[:28]]
 
     # ── Equipment — normalise to per-slot dict ───────────────────────
-    equipment: dict[str, dict[str, Any]] = {slot: {} for slot in EQUIPMENT_SLOTS}
-    equip_data = player.get("equipment", {})
-    equip_items = equip_data.get("items", []) if isinstance(equip_data, dict) else []
-    for item in equip_items:
-        if isinstance(item, dict):
-            slot = item.get("equipmentSlot", "").upper()
-            if slot in equipment:
-                equipment[slot] = {
-                    "id": item.get("id"),
-                    "name": item.get("name", ""),
-                    "gePrice": item.get("gePrice", 0),
-                    "haPrice": item.get("haPrice", 0),
-                    "quantity": item.get("quantity", 0),
-                }
+    equip_data = player.get("equipment")
+    if equip_data is None:
+        result["equipment"] = {slot: {} for slot in EQUIPMENT_SLOTS}
+    elif not isinstance(equip_data, dict):
+        _skip("equipment", equip_data)
+    elif (equip_items := _parse_items("equipment", equip_data)) is not None:
+        equipment: dict[str, dict[str, Any]] = {slot: {} for slot in EQUIPMENT_SLOTS}
+        for item in equip_items:
+            slot = item.get("equipmentSlot")
+            if not isinstance(slot, str):
+                _skip("equipment item without a slot", slot)
+                continue
+            if slot.upper() in equipment:
+                equipment[slot.upper()] = _parse_item(item)
+        result["equipment"] = equipment
 
-    # ── Health ────────────────────────────────────────────────────────
-    health: dict[str, int] = {"current": 0, "max": 0}
-    health_data = player.get("health")
-    if isinstance(health_data, dict):
-        health = {
-            "current": health_data.get("current", 0),
-            "max": health_data.get("max", 0),
-        }
+    # ── Health, prayer points, location, spellbook ───────────────────
+    defaults: dict[str, dict[str, Any]] = {
+        "health": {"current": 0, "max": 0},
+        "prayerPoints": {"current": 0, "max": 0},
+        "location": {"x": 0, "y": 0, "plane": 0},
+    }
+    for section, default in defaults.items():
+        data = player.get(section)
+        if data is None:
+            result[section] = default
+        elif (parsed := _parse_numbers(section, data, tuple(default))) is not None:
+            result[section] = parsed
 
-    # ── Prayer Points ─────────────────────────────────────────────────
-    prayer_points: dict[str, int] = {"current": 0, "max": 0}
-    prayer_data = player.get("prayerPoints")
-    if isinstance(prayer_data, dict):
-        prayer_points = {
-            "current": prayer_data.get("current", 0),
-            "max": prayer_data.get("max", 0),
-        }
-
-    # ── Location ─────────────────────────────────────────────────────
-    location: dict[str, int] = {"x": 0, "y": 0, "plane": 0}
-    location_data = player.get("location")
-    if isinstance(location_data, dict):
-        location = {
-            "x": location_data.get("x", 0),
-            "y": location_data.get("y", 0),
-            "plane": location_data.get("plane", 0),
-        }
-
-    # ── Spellbook ────────────────────────────────────────────────────
-    spellbook: dict[str, Any] = {"id": 0, "name": ""}
     spellbook_data = player.get("spellbook")
-    if isinstance(spellbook_data, dict):
-        spellbook = {
-            "id": spellbook_data.get("id", 0),
-            "name": spellbook_data.get("name", ""),
-        }
+    if spellbook_data is None:
+        result["spellbook"] = {"id": 0, "name": ""}
+    elif not isinstance(spellbook_data, dict):
+        _skip("spellbook", spellbook_data)
+    else:
+        spellbook_id = spellbook_data.get("id", 0)
+        spellbook_name = spellbook_data.get("name", "")
+        if _is_int(spellbook_id) and isinstance(spellbook_name, str):
+            result["spellbook"] = {"id": spellbook_id, "name": spellbook_name}
+        else:
+            _skip("spellbook", spellbook_data)
 
     # ── Events ─────────────────────────────────────────────────────────
     # The RuneLite plugin sends events at the root level of the payload
@@ -134,7 +199,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     # compute a per-account presence timeout (deadman's switch).
     tick_delay: int | None = None
     raw_tick = payload.get("tickDelay")
-    if isinstance(raw_tick, (int, float)) and raw_tick > 0:
+    if _is_number(raw_tick) and raw_tick > 0:
         tick_delay = int(raw_tick)
 
     # ── Game state (root-level) ──────────────────────────────────────
@@ -180,12 +245,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "accountType": account_type,
         "world": world,
         "skills": skills,
-        "inventory": inventory,
-        "equipment": equipment,
-        "health": health,
-        "prayerPoints": prayer_points,
-        "location": location,
-        "spellbook": spellbook,
+        **result,
         "events": events,
         "tickDelay": tick_delay,
         "state": game_state,
