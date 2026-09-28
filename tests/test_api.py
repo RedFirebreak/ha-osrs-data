@@ -392,6 +392,37 @@ class TestEventsAccountHash:
         assert [d["data"]["killerName"] for d in deaths] == ["Jad", "Zuk"]
         assert "OldName" not in history.to_dict()
 
+    async def _renamed_then_late_resend(self):
+        """Rename OldName -> NewName, then deliver a queued OldName payload."""
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        token = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())["token"]
+        for name, ts in (("OldName", 1_000), ("NewName", 3_000), ("OldName", 2_000)):
+            payload = {**self._payload(name, self.HASH), "timestamp": ts}
+            assert (await self._post(hass, token, payload)).status == 200
+        acct = store.accounts[0]
+        assert acct.player_name == "NewName"
+        return hass, store, token, acct
+
+    @pytest.mark.asyncio
+    async def test_late_resend_old_name_without_hash_is_another_account(self):
+        hass, store, token, acct = await self._renamed_then_late_resend()
+        await self._post(hass, token, {**self._payload("OldName"), "timestamp": 4_000})
+        assert acct.player_name == "NewName"
+        assert len(store.accounts) == 2
+
+    @pytest.mark.asyncio
+    async def test_late_resend_current_name_without_hash_resolves_account(self):
+        hass, store, token, acct = await self._renamed_then_late_resend()
+        await self._post(hass, token, {**self._payload("NewName"), "timestamp": 4_000})
+        assert store.accounts == [acct]
+
+    @pytest.mark.asyncio
+    async def test_late_resend_current_name_with_hash_resolves_account(self):
+        hass, store, token, acct = await self._renamed_then_late_resend()
+        await self._post(hass, token, {**self._payload("NewName", self.HASH), "timestamp": 4_000})
+        assert store.accounts == [acct]
+        assert store.get_or_create(None, "NewName") is acct
+
     @pytest.mark.asyncio
     async def test_payload_without_hash_unchanged(self):
         hass, store, pairing_store, _ = _make_hass_with_pairing()

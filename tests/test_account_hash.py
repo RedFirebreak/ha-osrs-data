@@ -101,6 +101,28 @@ class TestHashedAccounts:
         # A is still reachable by its hash
         assert store.get_or_create(None, "Alice", plugin_hash=HASH_A) is a
 
+    def test_hash_lookup_does_not_reindex_name(self):
+        store = AccountStore()
+        acct = store.get_or_create(None, "Old", plugin_hash=HASH_A)
+        store.get_or_create(None, "New", plugin_hash=HASH_A).update_player_data(
+            {}, player_name="New"
+        )
+        # A late resend with the old name is looked up but not applied.
+        assert store.get_or_create(None, "Old", plugin_hash=HASH_A) is acct
+        assert acct.player_name == "New"
+
+        assert store.get_or_create(None, "New") is acct
+        assert store.get_or_create(None, "Old") is not acct
+        assert len(store.accounts) == 2
+
+    def test_name_index_follows_rename_back(self):
+        store = AccountStore()
+        acct = store.get_or_create(None, "Old", plugin_hash=HASH_A)
+        acct.update_player_data({}, player_name="New")
+        acct.update_player_data({}, player_name="Old")  # applied snapshot
+        assert store.get_or_create(None, "Old") is acct
+        assert store.get_or_create(None, "New") is not acct
+
     def test_hashless_payload_still_resolves_bound_account(self):
         store = AccountStore()
         acct = store.get_or_create(None, "Bob", plugin_hash=HASH_A)

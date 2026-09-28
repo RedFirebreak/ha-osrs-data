@@ -488,10 +488,12 @@ class AccountStore:
         if plugin_hash:
             state = self._by_plugin_hash.get(plugin_hash)
             if state is not None:
-                self._index_name(state, norm)
+                # No name indexing here: the payload may be a late resend
+                # that is never applied.  The display name (and so the
+                # name lookup) only changes when a snapshot is applied.
                 return state
 
-        state = self._by_name.get(norm)
+        state = self._find_by_name(norm)
         if state is not None:
             if plugin_hash:
                 if state.plugin_account_hash is None:
@@ -532,14 +534,23 @@ class AccountStore:
             n += 1
         return key
 
-    def _index_name(self, state: AccountState, norm: str) -> None:
-        """Point the name index at *state*, dropping its stale old name."""
-        if self._by_name.get(norm) is state:
-            return
-        old_norm = _normalize_player_name(state.player_name)
-        if self._by_name.get(old_norm) is state:
-            del self._by_name[old_norm]
-        self._by_name[norm] = state
+    def _find_by_name(self, norm: str) -> AccountState | None:
+        """Return the account whose *current* display name is *norm*.
+
+        ``_by_name`` is only a cache: an entry for an account that has
+        since been renamed is ignored, so lookups always follow the names
+        of applied snapshots.  If two accounts share a name, the cached
+        (most recently created or loaded) one wins.
+        """
+        state = self._by_name.get(norm)
+        if state is not None and _normalize_player_name(state.player_name) == norm:
+            return state
+        for state in self.accounts:
+            if _normalize_player_name(state.player_name) == norm:
+                self._by_name[norm] = state
+                return state
+        self._by_name.pop(norm, None)
+        return None
 
     def get_by_hash(self, account_hash: str) -> AccountState | None:
         """Look up an account by its entity key."""
@@ -547,7 +558,7 @@ class AccountStore:
         if state is not None:
             return state
         # Fallback: check if the key is a normalized-name key
-        return self._by_name.get(account_hash)
+        return self._find_by_name(account_hash)
 
     @property
     def accounts(self) -> list[AccountState]:
