@@ -33,9 +33,9 @@ class _MockView:
     """Minimal HomeAssistantView stand-in."""
     requires_auth = True
 
-    def json(self, data, status_code=200):
+    def json(self, data, status_code=200, headers=None):
         from aiohttp.web import json_response
-        return json_response(data, status=status_code)
+        return json_response(data, status=status_code, headers=headers)
 
 
 _http_mod.HomeAssistantView = _MockView
@@ -640,3 +640,167 @@ class TestOsrsPairViewConfigFlowPending:
         result = await view.post(request)
 
         assert result.status == 503
+
+
+# ── Plugin compatibility (HA Exporter #28–#35) ───────────────────────
+
+
+def _paired(hass_tuple):
+    hass, store, pairing_store, storage = hass_tuple
+    pair = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+    return hass, store, pairing_store, pair
+
+
+async def _post_events(hass, token, payload, extra_headers=None):
+    headers = {"X-Osrs-Token": token}
+    if extra_headers:
+        headers.update(extra_headers)
+    request = _make_json_request(hass, payload, headers=headers)
+    return await OsrsEventsView().post(request)
+
+
+class TestBadInputIs4xx:
+    """The plugin retries 5xx; bad input must be 4xx so it is dropped."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_400(self):
+        hass, _, _, pair = _paired(_make_hass_with_pairing())
+        request = _make_json_request(hass, None, headers={"X-Osrs-Token": pair["token"]})
+        request.json = AsyncMock(side_effect=json.JSONDecodeError("bad", "x", 0))
+        result = await OsrsEventsView().post(request)
+        assert result.status == 400
+
+    @pytest.mark.asyncio
+    async def test_list_body_returns_400(self):
+        hass, _, _, pair = _paired(_make_hass_with_pairing())
+        result = await _post_events(hass, pair["token"], [1, 2, 3])
+        assert result.status == 400
+
+    @pytest.mark.asyncio
+    async def test_bad_event_does_not_fail_payload(self):
+        hass, _, _, pair = _paired(_make_hass_with_pairing())
+        payload = {
+            "player": {"name": "PlayerOne"},
+            "events": [
+                {"type": 123, "data": {}},  # type isn't a string -> .upper() fails
+                {"type": "death", "eventId": "ok-1", "data": {"killerName": "Jad"}},
+            ],
+        }
+        result = await _post_events(hass, pair["token"], payload)
+        assert result.status == 200
+        fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
+        assert any(f.get("event_type") == "DEATH" for f in fired)
+
+    @pytest.mark.asyncio
+    async def test_pair_non_string_code_returns_400(self):
+        hass, _, _, _ = _make_hass_with_pairing()
+        request = _make_json_request(hass, {"code": 12345})
+        result = await OsrsPairView().post(request)
+        assert result.status == 400
+
+
+class TestPairResponseName:
+    @pytest.mark.asyncio
+    async def test_pair_response_includes_location_name(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        hass.config.location_name = "My Home"
+        code = pairing_store.create_pairing_code()
+        result = await OsrsPairView().post(_make_json_request(hass, {"code": code}))
+        body = json.loads(result.body)
+        assert result.status == 200
+        assert body["name"] == "My Home"
+
+    @pytest.mark.asyncio
+    async def test_pair_response_omits_blank_name(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        hass.config.location_name = "  "
+        code = pairing_store.create_pairing_code()
+        result = await OsrsPairView().post(_make_json_request(hass, {"code": code}))
+        assert "name" not in json.loads(result.body)
+
+
+class TestRetryAfter:
+    @pytest.mark.asyncio
+    async def test_events_503_has_retry_after(self):
+        hass = MagicMock()
+        hass.data = {}
+        request = _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": "x"})
+        result = await OsrsEventsView().post(request)
+        assert result.status == 503
+        assert result.headers.get("Retry-After") == "60"
+
+    @pytest.mark.asyncio
+    async def test_pair_503_has_retry_after(self):
+        hass = MagicMock()
+        hass.data = {}
+        result = await OsrsPairView().post(_make_json_request(hass, {"code": "12345"}))
+        assert result.status == 503
+        assert result.headers.get("Retry-After") == "60"
+
+
+class TestPluginVersion:
+    HEADER = "X-Osrs-Exporter-Version"
+
+    @pytest.mark.asyncio
+    async def test_version_recorded_on_device_and_account(self):
+        hass, store, pairing_store, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], BASE_PAYLOAD, {self.HEADER: "1.4"})
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.plugin_version == "1.4"
+        device = next(d for d in pairing_store.list_devices() if d["device_id"] == pair["device_id"])
+        assert device["plugin_version"] == "1.4"
+        assert device["last_seen"]
+
+    @pytest.mark.asyncio
+    async def test_version_capped(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], BASE_PAYLOAD, {self.HEADER: "9" * 100})
+        assert len(store.get_or_create(None, "PlayerOne").plugin_version) == 32
+
+    @pytest.mark.asyncio
+    async def test_no_header_keeps_previous_version(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], BASE_PAYLOAD, {self.HEADER: "1.4"})
+        payload = {**BASE_PAYLOAD, "tickDelay": 50}
+        await _post_events(hass, pair["token"], payload)
+        assert store.get_or_create(None, "PlayerOne").plugin_version == "1.4"
+
+
+class TestStaleSnapshot:
+    """Queued payloads resent late must not overwrite newer state."""
+
+    def _payload(self, ts, world, events=None):
+        return {
+            "player": {"name": "PlayerOne", "world": world},
+            "events": events or [],
+            "timestamp": ts,
+        }
+
+    @pytest.mark.asyncio
+    async def test_older_snapshot_ignored_but_events_fire(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302"))
+        hass.bus.async_fire.reset_mock()
+        old = self._payload(1_000, "999", [{"type": "death", "eventId": "late-1", "data": {}}])
+        result = await _post_events(hass, pair["token"], old)
+        assert result.status == 200
+        assert store.get_or_create(None, "PlayerOne").world == "302"
+        fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
+        assert any(f.get("event_type") == "DEATH" for f in fired)
+
+    @pytest.mark.asyncio
+    async def test_newer_snapshot_applies(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(1_000, "302"))
+        await _post_events(hass, pair["token"], self._payload(2_000, "303"))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.world == "303"
+        assert acct.last_payload_ts == 2_000
+
+    @pytest.mark.asyncio
+    async def test_payload_without_timestamp_always_applies(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302"))
+        legacy = {"player": {"name": "PlayerOne", "world": "310"}, "events": []}
+        await _post_events(hass, pair["token"], legacy)
+        assert store.get_or_create(None, "PlayerOne").world == "310"

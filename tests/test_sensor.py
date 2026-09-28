@@ -66,6 +66,7 @@ from custom_components.osrs_data.sensor import (  # noqa: E402
     OsrsCombatLevelSensor,
     OsrsLastDeathSensor,
     OsrsLastLootSensor,
+    OsrsLastCollectionLogSensor,
 )
 
 
@@ -373,6 +374,53 @@ class TestOsrsLastEventSensors:
         )
         sensor = OsrsLastLootSensor(entry, state, "hash1")
         assert sensor.native_value == "Bones"
+
+
+class TestOsrsLastCollectionLogSensor:
+    """Collection log events from the HA Exporter plugin (#35)."""
+
+    def test_none_until_event(self):
+        state = AccountState("hash1", "Player")
+        sensor = OsrsLastCollectionLogSensor(_make_entry(), state, "hash1")
+        assert sensor.native_value is None
+        assert sensor.extra_state_attributes == {"recent": []}
+        assert sensor.unique_id == "hash1_last_collection_log"
+
+    def test_populated(self):
+        state = AccountState("hash1", "Player")
+        state.record_game_event(
+            "COLLECTIONLOG",
+            {"itemName": "Abyssal whip", "itemId": 4151, "value": 1_500_000, "killCount": 312},
+            "2025-01-01T00:00:00+00:00",
+        )
+        sensor = OsrsLastCollectionLogSensor(_make_entry(), state, "hash1")
+        assert sensor.native_value == "Abyssal whip"
+        attrs = sensor.extra_state_attributes
+        assert attrs["item_id"] == 4151
+        assert attrs["value"] == 1_500_000
+        assert attrs["kill_count"] == 312
+        assert attrs["timestamp"] == "2025-01-01T00:00:00+00:00"
+
+    def test_unknown_item_id_and_missing_kill_count(self):
+        state = AccountState("hash1", "Player")
+        state.record_game_event("COLLECTIONLOG", {"itemName": "Odd thing", "itemId": -1, "value": 0})
+        attrs = OsrsLastCollectionLogSensor(_make_entry(), state, "hash1").extra_state_attributes
+        assert attrs["item_id"] is None
+        assert attrs["kill_count"] is None
+
+
+class TestPluginVersionOnDevice:
+    def test_sw_version_when_known(self):
+        state = AccountState("hash1", "Player")
+        state.plugin_version = "1.4"
+        sensor = OsrsPlayerInfoSensor(_make_entry(), state, "hash1")
+        assert sensor.device_info["sw_version"] == "1.4"
+        assert sensor.extra_state_attributes["plugin_version"] == "1.4"
+
+    def test_no_sw_version_when_unknown(self):
+        sensor = OsrsPlayerInfoSensor(_make_entry(), AccountState("hash1", "Player"), "hash1")
+        assert "sw_version" not in sensor.device_info
+        assert "plugin_version" not in sensor.extra_state_attributes
 
 
 class TestUniqueIdStabilityAcrossHashMigration:

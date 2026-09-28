@@ -56,9 +56,10 @@ class AccountHistory:
         event_type: str,
         summary: str,
         data: dict[str, Any],
+        timestamp: str | None = None,
     ) -> None:
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
             "event_type": event_type,
             "summary": summary,
             "data": data,

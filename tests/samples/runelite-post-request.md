@@ -8,6 +8,7 @@ with an `X-Osrs-Token` header for authentication.
 ```
 Content-Type: application/json
 X-Osrs-Token: <device-token>
+X-Osrs-Exporter-Version: 1.4
 ```
 
 ## Example Payload
@@ -16,8 +17,10 @@ X-Osrs-Token: <device-token>
 {
     "player": {
         "name": "PlayerOne",
-        "accountType": "normal",
+        "accountHash": "de731bc0f710567a6a0e852bbe79eb5fa8daf37d4140440a774591f0",
+        "accountType": "0",
         "world": "302",
+        "worldTypes": ["MEMBERS"],
         "stats": {
             "skills": {
                 "Attack": { "xp": 737627, "level": 60 },
@@ -82,10 +85,19 @@ X-Osrs-Token: <device-token>
                 { "name": "Berserker ring (i)", "gePrice": 3000000, "haPrice": 45000, "quantity": 1, "equipmentSlot": "RING" },
                 { "name": "Dragon defender", "gePrice": 0, "haPrice": 0, "quantity": 1, "equipmentSlot": "SHIELD" }
             ]
-        },
-        "events": []
+        }
     },
-    "state": "LOGGED_IN"
+    "events": [
+        {
+            "type": "collectionLog",
+            "data": { "itemName": "Abyssal whip", "itemId": 4151, "value": 1500000, "killCount": 312 },
+            "eventId": "3f2c9a4e-8d1b-4c6e-9f0a-2b7d5e1c8a90",
+            "timestamp": 1735689600000
+        }
+    ],
+    "state": "LOGGED_IN",
+    "tickDelay": 100,
+    "timestamp": 1735689600123
 }
 ```
 
@@ -93,7 +105,8 @@ X-Osrs-Token: <device-token>
 
 | Sensor | State | Attributes |
 |--------|-------|------------|
-| Player Info | Player name | `account_type`, `world`, `last_update`, `events` |
+| Player Info | Player name | `display_name`, `previous_names`, `account_type`, `world`, `world_types`, `last_update`, `plugin_version`, `events` |
+| Last Collection Log | Most recent new collection log item | `item_id`, `value`, `kill_count`, `timestamp`, `recent` |
 | Inventory | Number of items | `items` (list), `slots_used`, `slots_total` (28) |
 | Health | Current hitpoints | `current`, `max`, `last_update` |
 | Prayer Points | Current prayer points | `current`, `max`, `last_update` |
