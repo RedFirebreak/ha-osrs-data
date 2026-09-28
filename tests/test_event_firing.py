@@ -493,6 +493,32 @@ class TestEventDedupeCache:
         event_modified = {"type": "DEATH", "event_id": "unique-123", "data": {"killer": "Zuk"}}
         assert cache.is_duplicate("player1", event_modified) is True
 
+    def test_camelcase_event_id_used_for_dedup(self):
+        """The plugin's per-event ``eventId`` is the dedup key."""
+        cache = EventDedupeCache(ttl=30)
+        event = {"type": "DEATH", "eventId": "uuid-1", "data": {"killer": "Jad"}}
+        cache.is_duplicate("player1", event)
+        event_modified = {"type": "DEATH", "eventId": "uuid-1", "data": {"killer": "Zuk"}}
+        assert cache.is_duplicate("player1", event_modified) is True
+
+    def test_camelcase_event_id_preferred_over_legacy(self):
+        cache = EventDedupeCache(ttl=30)
+        cache.is_duplicate("player1", {"type": "DEATH", "eventId": "new-1", "event_id": "old-1", "data": {}})
+        # Same legacy id but a different eventId -> not a duplicate
+        assert cache.is_duplicate(
+            "player1", {"type": "DEATH", "eventId": "new-2", "event_id": "old-1", "data": {}}
+        ) is False
+        # Same eventId -> duplicate regardless of legacy id
+        assert cache.is_duplicate(
+            "player1", {"type": "DEATH", "eventId": "new-1", "event_id": "other", "data": {}}
+        ) is True
+
+    def test_signature_fallback_without_ids(self):
+        cache = EventDedupeCache(ttl=30)
+        cache.is_duplicate("player1", {"type": "DEATH", "data": {"killer": "Jad"}})
+        assert cache.is_duplicate("player1", {"type": "DEATH", "data": {"killer": "Jad"}}) is True
+        assert cache.is_duplicate("player1", {"type": "DEATH", "data": {"killer": "Zuk"}}) is False
+
     def test_different_event_id_not_duplicate(self):
         cache = EventDedupeCache(ttl=30)
         event_a = {"type": "DEATH", "event_id": "id-1", "data": {}}

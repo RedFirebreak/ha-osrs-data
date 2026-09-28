@@ -172,6 +172,66 @@ class TestInventoryAndEquipment:
         assert len(state.detail_sensors) == 0
 
 
+class TestNonMainWorldSkip:
+    """Leagues/DMM/etc. stats must not overwrite main-game skill sensors."""
+
+    def _seed(self) -> AccountState:
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "world": 301,
+            "worldTypes": ["MEMBERS"],
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+            "health": {"current": 50, "max": 99},
+        })
+        return state
+
+    def test_seasonal_world_skips_skills_but_updates_live_data(self):
+        state = self._seed()
+        state.update_player_data({
+            "world": 449,
+            "worldTypes": ["MEMBERS", "SEASONAL"],
+            "skills": {
+                "Attack": {"xp": 13034431, "level": 99},
+                "Magic": {"xp": 500, "level": 5},
+            },
+            "health": {"current": 10, "max": 99},
+        })
+        assert state.skills == {"Attack": {"xp": 1000, "level": 10}}
+        assert state.detail_sensors["Attack"]["value"] == 10
+        assert "Magic" not in state.detail_sensors
+        assert state.world == 449
+        assert state.world_types == ["MEMBERS", "SEASONAL"]
+        assert state.health == {"current": 10, "max": 99}
+        assert state.is_online is True
+
+    def test_each_non_main_world_type_skips_skills(self):
+        for wt in (
+            "SEASONAL", "DEADMAN", "BETA_WORLD", "TOURNAMENT_WORLD",
+            "QUEST_SPEEDRUNNING", "NOSAVE_MODE", "PVP_ARENA",
+        ):
+            state = self._seed()
+            state.update_player_data({
+                "worldTypes": [wt],
+                "skills": {"Attack": {"xp": 99999, "level": 50}},
+            })
+            assert state.skills["Attack"]["xp"] == 1000, wt
+
+    def test_main_world_updates_skills(self):
+        state = self._seed()
+        state.update_player_data({
+            "worldTypes": ["MEMBERS"],
+            "skills": {"Attack": {"xp": 2000, "level": 12}},
+        })
+        assert state.skills["Attack"] == {"xp": 2000, "level": 12}
+        assert state.detail_sensors["Attack"]["value"] == 12
+
+    def test_world_types_persisted(self):
+        state = self._seed()
+        restored = AccountState("hash1", "Player")
+        restored.load_dict(state.to_dict())
+        assert restored.world_types == ["MEMBERS"]
+
+
 class TestSlugifyDetailKey:
     """Tests for the _slugify_detail_key helper."""
 

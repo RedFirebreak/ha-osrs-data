@@ -424,3 +424,59 @@ class TestStateParsing:
         result = parse({"player": {"name": "P"}, "state": ""})
         assert result is not None
         assert result["state"] == "UNKNOWN"
+
+
+# ── Optional fields from newer plugin versions ──────────────────────
+
+
+class TestNewPluginFields:
+    HASH = "a" * 56  # salted SHA-224 hex digest
+
+    def test_new_fields_parsed(self):
+        result = parse({
+            "timestamp": "2026-09-28T12:00:00Z",
+            "player": {
+                "name": "P",
+                "accountHash": self.HASH,
+                "worldTypes": ["MEMBERS", "seasonal"],
+            },
+            "events": [
+                {
+                    "type": "DEATH",
+                    "eventId": "uuid-1",
+                    "timestamp": "2026-09-28T11:59:59Z",
+                    "data": {},
+                }
+            ],
+        })
+        assert result is not None
+        assert result["timestamp"] == "2026-09-28T12:00:00Z"
+        assert result["accountHash"] == self.HASH
+        assert result["worldTypes"] == ["MEMBERS", "SEASONAL"]
+        # Per-event fields pass through untouched
+        assert result["events"][0]["eventId"] == "uuid-1"
+        assert result["events"][0]["timestamp"] == "2026-09-28T11:59:59Z"
+
+    def test_new_fields_absent_defaults(self):
+        result = parse({"player": {"name": "P"}})
+        assert result is not None
+        assert result["timestamp"] is None
+        assert result["accountHash"] is None
+        assert result["worldTypes"] == []
+
+    def test_malformed_world_types_ignored(self):
+        for bad in ("SEASONAL", {"a": 1}, 5, None):
+            result = parse({"player": {"name": "P", "worldTypes": bad}})
+            assert result is not None
+            assert result["worldTypes"] == []
+
+    def test_non_string_world_type_entries_dropped(self):
+        result = parse({"player": {"name": "P", "worldTypes": ["MEMBERS", 3, None, ""]}})
+        assert result is not None
+        assert result["worldTypes"] == ["MEMBERS"]
+
+    def test_malformed_account_hash_ignored(self):
+        for bad in ("", "   ", 12345, None, {"h": 1}):
+            result = parse({"player": {"name": "P", "accountHash": bad}})
+            assert result is not None
+            assert result["accountHash"] is None

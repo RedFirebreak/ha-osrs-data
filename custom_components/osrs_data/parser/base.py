@@ -150,6 +150,25 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(raw_state, str) and raw_state.upper() in _VALID_GAME_STATES:
         game_state = raw_state.upper()
 
+    # ── Optional fields from newer plugin versions ───────────────────
+    # All are optional; missing or malformed values never fail the parse.
+    # ``accountHash`` is a salted SHA-224 hex digest (never the raw
+    # RuneLite hash).  Per-event ``eventId``/``timestamp`` pass through
+    # untouched inside ``events``.
+    raw_account_hash = player.get("accountHash")
+    account_hash: str | None = (
+        raw_account_hash.strip()
+        if isinstance(raw_account_hash, str) and raw_account_hash.strip()
+        else None
+    )
+
+    raw_world_types = player.get("worldTypes")
+    world_types: list[str] = []
+    if isinstance(raw_world_types, list):
+        world_types = [
+            wt.upper() for wt in raw_world_types if isinstance(wt, str) and wt
+        ]
+
     return {
         "name": name,
         "accountType": account_type,
@@ -164,4 +183,7 @@ def parse(payload: dict[str, Any]) -> dict[str, Any] | None:
         "events": events,
         "tickDelay": tick_delay,
         "state": game_state,
+        "timestamp": payload.get("timestamp"),
+        "accountHash": account_hash,
+        "worldTypes": world_types,
     }

@@ -55,9 +55,10 @@ class DedupeCache:
 class EventDedupeCache:
     """TTL cache that drops duplicate individual events within a time window.
 
-    If an event carries an ``event_id`` field it is used directly as the
-    dedup key.  Otherwise a composite signature is built from the account
-    name, event type, and event data.
+    If an event carries an ``eventId`` (current plugin) or ``event_id``
+    (legacy) field it is used directly as the dedup key.  Otherwise a
+    composite signature is built from the account name, event type, and
+    event data.
     """
 
     def __init__(self, ttl: int = DEFAULT_TTL) -> None:
@@ -82,7 +83,7 @@ class EventDedupeCache:
     @staticmethod
     def _event_key(account_name: str, event: dict[str, Any]) -> str:
         """Build a dedup key for a single event dict."""
-        event_id = event.get("event_id")
+        event_id = event.get("eventId") or event.get("event_id")
         if event_id:
             return str(event_id)
         raw = (

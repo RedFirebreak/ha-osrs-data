@@ -235,7 +235,7 @@ class TestOsrsEventsView:
 
     @pytest.mark.asyncio
     async def test_events_invalid_token(self):
-        """Invalid token returns 403."""
+        """Invalid token returns 401 so the plugin disables the connection."""
         hass, _, _, _ = _make_hass_with_pairing()
 
         view = OsrsEventsView()
@@ -244,13 +244,13 @@ class TestOsrsEventsView:
         )
         result = await view.post(request)
 
-        assert result.status == 403
+        assert result.status == 401
         body = json.loads(result.body)
         assert body["ok"] is False
 
     @pytest.mark.asyncio
     async def test_events_revoked_token(self):
-        """Revoked token returns 403."""
+        """Revoked token returns 401 so the plugin disables the connection."""
         hass, _, pairing_store, _ = _make_hass_with_pairing()
         code = pairing_store.create_pairing_code()
         pair_result = pairing_store.consume_pairing_code(code)
@@ -263,7 +263,7 @@ class TestOsrsEventsView:
         )
         result = await view.post(request)
 
-        assert result.status == 403
+        assert result.status == 401
 
     @pytest.mark.asyncio
     async def test_events_fires_ha_event(self):

@@ -35,6 +35,19 @@ TICK_DURATION = 0.6
 # 3.1x allows ~2 missed messages of grace before marking offline.
 TICK_TIMEOUT_MULTIPLIER = 3.1
 
+# World types whose stats are separate from the main game (Leagues, DMM,
+# beta, tournament, …).  Skill/XP sensors are not updated on these worlds
+# so they don't overwrite main-game values; live sensors still update.
+NON_MAIN_WORLD_TYPES = frozenset({
+    "SEASONAL",
+    "DEADMAN",
+    "BETA_WORLD",
+    "TOURNAMENT_WORLD",
+    "QUEST_SPEEDRUNNING",
+    "NOSAVE_MODE",
+    "PVP_ARENA",
+})
+
 # ── Configurable options (stored in ConfigEntry.options) ────────────
 # Keys and their defaults.  Defaults preserve prior hardcoded behavior,
 # so an entry with no options behaves exactly as before.
