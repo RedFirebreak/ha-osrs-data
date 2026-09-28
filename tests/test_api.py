@@ -323,6 +323,67 @@ class TestOsrsEventsView:
         assert body2.get("duplicate") is True
 
 
+class TestEventsAccountHash:
+    """accountHash keeps a renamed account on the same device/entities."""
+
+    HASH = "c" * 56
+
+    def _payload(self, name, account_hash=None, events=None):
+        player = {"name": name, "world": "302"}
+        if account_hash:
+            player["accountHash"] = account_hash
+        return {"player": player, "events": events or []}
+
+    async def _post(self, hass, token, payload):
+        view = OsrsEventsView()
+        request = _make_json_request(hass, payload, headers={"X-Osrs-Token": token})
+        return await view.post(request)
+
+    @pytest.mark.asyncio
+    async def test_rename_with_hash_keeps_account_and_history(self):
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        pair = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+        token = pair["token"]
+        history = hass.data[DOMAIN]["test_entry"][DATA_HISTORY_STORE]
+
+        send = MagicMock()
+        # Patch the view's own globals: other tests re-import the api module.
+        with patch.dict(OsrsEventsView.post.__globals__, {"async_dispatcher_send": send}):
+            # Legacy account created before the plugin sent hashes
+            r = await self._post(hass, token, self._payload(
+                "OldName", events=[{"type": "DEATH", "data": {"killerName": "Jad"}}]
+            ))
+            assert r.status == 200
+            r = await self._post(hass, token, self._payload("OldName", self.HASH))
+            assert r.status == 200
+            r = await self._post(hass, token, self._payload(
+                "NewName", self.HASH,
+                events=[{"type": "DEATH", "data": {"killerName": "Zuk"}}],
+            ))
+            assert r.status == 200
+
+        assert len(store.accounts) == 1
+        acct = store.accounts[0]
+        assert acct.account_hash == "oldname"
+        assert acct.player_name == "NewName"
+        assert acct.previous_names == ["OldName"]
+        dispatched = {c.args[2] for c in send.call_args_list}
+        assert dispatched == {"oldname"}
+        deaths = history.get_or_create("NewName").get("DEATH")
+        assert [d["data"]["killerName"] for d in deaths] == ["Jad", "Zuk"]
+        assert "OldName" not in history.to_dict()
+
+    @pytest.mark.asyncio
+    async def test_payload_without_hash_unchanged(self):
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        pair = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+        r = await self._post(hass, pair["token"], self._payload("PlayerOne"))
+        assert r.status == 200
+        acct = store.accounts[0]
+        assert acct.account_hash == "playerone"
+        assert acct.plugin_account_hash is None
+
+
 # ── Devices endpoint tests ──────────────────────────────────────────
 
 

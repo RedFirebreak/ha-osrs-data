@@ -373,3 +373,34 @@ class TestOsrsLastEventSensors:
         )
         sensor = OsrsLastLootSensor(entry, state, "hash1")
         assert sensor.native_value == "Bones"
+
+
+class TestUniqueIdStabilityAcrossHashMigration:
+    """Binding a plugin accountHash must not change any unique_id."""
+
+    def test_unique_ids_unchanged_after_hash_and_rename(self):
+        from custom_components.osrs_data.account_store import AccountStore
+
+        entry = _make_entry()
+        store = AccountStore()
+        state = store.get_or_create(None, "Zezima")
+        classes = (
+            OsrsPlayerInfoSensor, OsrsInventorySensor, OsrsEquipmentSensor,
+            OsrsGameStateSensor, OsrsTotalLevelSensor, OsrsCombatLevelSensor,
+            OsrsLastDeathSensor, OsrsLastLootSensor,
+        )
+        before = [cls(entry, state, "zezima").unique_id for cls in classes]
+
+        store.get_or_create(None, "Zezima", plugin_hash="a" * 56)
+        migrated = store.get_or_create(None, "New Name", plugin_hash="a" * 56)
+        migrated.update_player_data({}, player_name="New Name")
+        assert migrated is state
+        after = [cls(entry, migrated, "zezima").unique_id for cls in classes]
+        assert before == after
+        assert before[0] == "zezima_player_info"
+
+        info = OsrsPlayerInfoSensor(entry, migrated, "zezima")
+        attrs = info.extra_state_attributes
+        assert info.native_value == "New Name"
+        assert attrs["display_name"] == "New Name"
+        assert attrs["previous_names"] == ["Zezima"]

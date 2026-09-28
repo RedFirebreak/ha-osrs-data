@@ -129,12 +129,19 @@ class TestAccountStore:
         second = store.get_or_create(None, "player one")
         assert first is second
 
-    def test_upgrade_name_to_hash(self):
+    def test_upgrade_name_to_hash_keeps_key(self):
+        """A later hash resolves to the same state without re-keying it.
+
+        The key is the basis for entity unique_ids, so it must never change.
+        """
         store = AccountStore()
         first = store.get_or_create(None, "Player")
         second = store.get_or_create("hash123", "Player")
         assert first is second
-        assert first.account_hash == "hash123"
+        assert first.account_hash == "player"
+        assert store.get_by_hash("hash123") is first
+        assert store.get_or_create("hash123", "Player") is first
+        assert len(store.accounts) == 1
 
     def test_multiple_accounts(self):
         store = AccountStore()

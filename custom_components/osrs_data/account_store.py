@@ -19,6 +19,9 @@ from .const import (
 )
 
 
+_MAX_PREVIOUS_NAMES = 10
+
+
 def _normalize_player_name(name: str) -> str:
     """Normalize an RSN to a stable key (lowercase, collapse whitespace)."""
     return re.sub(r"\s+", " ", name.strip().lower())
@@ -51,8 +54,16 @@ class AccountState:
         player_name: str,
         presence_timeout: float = PRESENCE_TIMEOUT,
     ) -> None:
+        # Immutable entity key: basis for device identifiers and entity
+        # unique_ids.  Never reassigned after creation.
         self.account_hash: str = account_hash
         self.player_name: str = player_name
+        # Stable plugin-provided account hash (salted SHA-224 hex).  Used
+        # only as a lookup alias so display-name changes resolve to the
+        # same account; it never replaces ``account_hash``.
+        self.plugin_account_hash: str | None = None
+        # Earlier display names (most recent last), capped.
+        self.previous_names: list[str] = []
         self.account_type: str | None = None
         self.world: str | None = None
         # World types of the current world (e.g. MEMBERS, SEASONAL)
@@ -115,7 +126,7 @@ class AccountState:
     ) -> None:
         """Update from parsed base JSON player data."""
         if player_name:
-            self.player_name = player_name
+            self._set_player_name(player_name)
 
         now = datetime.now(timezone.utc).isoformat()
         self.last_update = now
@@ -193,6 +204,16 @@ class AccountState:
                 }
 
             self.skills[skill_name] = {"xp": new_xp, "level": new_level}
+
+    def _set_player_name(self, player_name: str) -> None:
+        """Set the display name, remembering the old one on a real rename."""
+        old = self.player_name
+        if old and _normalize_player_name(old) != _normalize_player_name(player_name):
+            if old in self.previous_names:
+                self.previous_names.remove(old)
+            self.previous_names.append(old)
+            del self.previous_names[:-_MAX_PREVIOUS_NAMES]
+        self.player_name = player_name
 
     def record_event(self, event_type: str) -> None:
         """Increment the counter for *event_type* and update last_fired."""
@@ -273,7 +294,9 @@ class AccountState:
         """Serialize the account state to a dict for persistence."""
         return {
             "account_hash": self.account_hash,
+            "plugin_account_hash": self.plugin_account_hash,
             "player_name": self.player_name,
+            "previous_names": self.previous_names,
             "account_type": self.account_type,
             "world": self.world,
             "world_types": self.world_types,
@@ -300,6 +323,8 @@ class AccountState:
     def load_dict(self, data: dict[str, Any]) -> None:
         """Restore the account state from a persisted dict."""
         self.player_name = data.get("player_name", self.player_name)
+        self.plugin_account_hash = data.get("plugin_account_hash")
+        self.previous_names = data.get("previous_names", [])
         self.account_type = data.get("account_type")
         self.world = data.get("world")
         self.world_types = data.get("world_types", [])
@@ -328,49 +353,104 @@ class AccountState:
 
 
 class AccountStore:
-    """In-memory store keyed by account identifier (fallback: playerName)."""
+    """In-memory store of account states.
+
+    Each state has an immutable *key* (``AccountState.account_hash``) that
+    entity unique_ids and device identifiers are built from.  States are
+    found by key, by the plugin's stable ``accountHash`` alias, or by the
+    normalized display name.
+
+    Keys are never rewritten: accounts first seen by name keep the
+    normalized name as their key even after the plugin starts sending an
+    ``accountHash``, so existing entities are never re-keyed.  Accounts
+    first seen *with* a hash use it as their key.
+    """
 
     def __init__(self, presence_timeout: float = PRESENCE_TIMEOUT) -> None:
-        self._by_hash: dict[str, AccountState] = {}
+        self._by_key: dict[str, AccountState] = {}
         self._by_name: dict[str, AccountState] = {}
+        self._by_plugin_hash: dict[str, AccountState] = {}
         self._presence_timeout = presence_timeout
 
     def get_or_create(
-        self, account_hash: str | None, player_name: str
+        self,
+        account_hash: str | None,
+        player_name: str,
+        plugin_hash: str | None = None,
     ) -> AccountState:
-        """Look up an account by hash (preferred) or normalized name."""
-        if account_hash:
-            state = self._by_hash.get(account_hash)
+        """Look up (or create) an account.
+
+        *account_hash* is an explicit entity key (e.g. from persistence).
+        *plugin_hash* is the plugin-provided stable account hash; it is
+        matched first so a renamed account resolves to its existing state.
+        """
+        norm = _normalize_player_name(player_name)
+
+        if account_hash and account_hash in self._by_key:
+            return self._by_key[account_hash]
+
+        if plugin_hash:
+            state = self._by_plugin_hash.get(plugin_hash)
             if state is not None:
+                self._index_name(state, norm)
                 return state
 
-        norm = _normalize_player_name(player_name)
-        if norm in self._by_name:
-            state = self._by_name[norm]
-            # Upgrade: if we now have a hash, index by it too
-            if account_hash and account_hash not in self._by_hash:
-                self._by_hash[account_hash] = state
-                state.account_hash = account_hash
-            return state
+        state = self._by_name.get(norm)
+        if state is not None:
+            if plugin_hash:
+                if state.plugin_account_hash is None:
+                    # Legacy name-keyed account: bind the alias, keep the key.
+                    state.plugin_account_hash = plugin_hash
+                    self._by_plugin_hash[plugin_hash] = state
+                    return state
+                # Name is bound to a different account (name was reused
+                # after a name change) -- fall through and create a new one.
+            else:
+                if account_hash:
+                    # Extra key alias only; the state's own key is kept.
+                    self._by_key[account_hash] = state
+                return state
 
-        # Brand-new account
-        key = account_hash or norm
+        # Brand-new account.  The name-based key may already belong to an
+        # account that has since been renamed; suffix it so unique_ids
+        # never collide.
+        key = self._unused_key(plugin_hash or account_hash or norm)
         state = AccountState(
             account_hash=key,
             player_name=player_name,
             presence_timeout=self._presence_timeout,
         )
-        if account_hash:
-            self._by_hash[account_hash] = state
+        self._by_key[key] = state
         self._by_name[norm] = state
+        if plugin_hash:
+            state.plugin_account_hash = plugin_hash
+            self._by_plugin_hash[plugin_hash] = state
         return state
 
+    def _unused_key(self, base: str) -> str:
+        """Return *base*, or *base* with a numeric suffix if it's taken."""
+        key = base
+        n = 2
+        while key in self._by_key:
+            key = f"{base}_{n}"
+            n += 1
+        return key
+
+    def _index_name(self, state: AccountState, norm: str) -> None:
+        """Point the name index at *state*, dropping its stale old name."""
+        if self._by_name.get(norm) is state:
+            return
+        old_norm = _normalize_player_name(state.player_name)
+        if self._by_name.get(old_norm) is state:
+            del self._by_name[old_norm]
+        self._by_name[norm] = state
+
     def get_by_hash(self, account_hash: str) -> AccountState | None:
-        """Look up an account by its hash directly."""
-        state = self._by_hash.get(account_hash)
+        """Look up an account by its entity key."""
+        state = self._by_key.get(account_hash)
         if state is not None:
             return state
-        # Fallback: check if the hash is a normalized-name key
+        # Fallback: check if the key is a normalized-name key
         return self._by_name.get(account_hash)
 
     @property
@@ -378,7 +458,7 @@ class AccountStore:
         """Return all known account states (deduplicated)."""
         seen: set[int] = set()
         result: list[AccountState] = []
-        for state in list(self._by_hash.values()) + list(self._by_name.values()):
+        for state in self._by_key.values():
             if id(state) not in seen:
                 seen.add(id(state))
                 result.append(state)
@@ -391,7 +471,17 @@ class AccountStore:
     def load_dict(self, data: list[dict[str, Any]]) -> None:
         """Restore account states from persisted data."""
         for acct_data in data:
-            account_hash = acct_data.get("account_hash", "")
             player_name = acct_data.get("player_name", "Unknown")
-            state = self.get_or_create(account_hash, player_name)
+            key = acct_data.get("account_hash") or _normalize_player_name(player_name)
+            state = self._by_key.get(key)
+            if state is None:
+                state = AccountState(
+                    account_hash=key,
+                    player_name=player_name,
+                    presence_timeout=self._presence_timeout,
+                )
+                self._by_key[key] = state
             state.load_dict(acct_data)
+            self._by_name[_normalize_player_name(state.player_name)] = state
+            if state.plugin_account_hash:
+                self._by_plugin_hash[state.plugin_account_hash] = state

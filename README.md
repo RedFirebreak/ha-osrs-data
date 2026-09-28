@@ -92,7 +92,7 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 
 | Sensor | State | Key Attributes |
 |--------|-------|----------------|
-| **Player Info** | Player name | `account_type`, `world`, `world_types`, `last_update`, `events` |
+| **Player Info** | Player name | `display_name`, `previous_names`, `account_type`, `world`, `world_types`, `last_update`, `events` |
 | **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28) |
 | **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
 | **Health** | Current HP | `current`, `max`, `last_update` |
@@ -110,6 +110,8 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death** and **Last Loot** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)).
 
 On special worlds (Leagues/`SEASONAL`, `DEADMAN`, `BETA_WORLD`, `TOURNAMENT_WORLD`, `QUEST_SPEEDRUNNING`, `NOSAVE_MODE`, `PVP_ARENA`) skill, Total Level and Combat Level sensors are **not** updated, so those separate stats never overwrite your main-game values. Live sensors (health, world, location, online status, …) keep updating.
+
+**Name changes:** when the HA Exporter plugin sends its stable `accountHash`, a renamed account stays on the same device and entities: entity IDs, statistics and event history carry over, and the old name is listed in `previous_names`. Accounts that existed before this version keep their original entity IDs; the hash is linked the first time the plugin reports it. If an account is renamed *before* it has sent data with a hash even once, it shows up as a new device (the same as in older versions).
 
 ### Game State Values
 
