@@ -53,14 +53,13 @@ from custom_components.osrs_data.account_store import AccountStore, AccountState
 from custom_components.osrs_data.api import OsrsEventsView  # noqa: E402
 from custom_components.osrs_data.const import (  # noqa: E402
     DATA_ACCOUNT_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_HISTORY_STORE,
     DATA_PAIRING_STORE,
     DATA_STORE,
     DOMAIN,
 )
-from custom_components.osrs_data.dedupe import DedupeCache, EventDedupeCache  # noqa: E402
+from custom_components.osrs_data.dedupe import EventDedupeCache  # noqa: E402
 from custom_components.osrs_data.history import HistoryStore  # noqa: E402
 from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
 
@@ -83,7 +82,6 @@ def _setup_hass_and_token():
             entry_id: {
                 DATA_ACCOUNT_STORE: store,
                 DATA_HISTORY_STORE: HistoryStore(),
-                DATA_DEDUPE_CACHE: DedupeCache(),
                 DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(),
                 DATA_PAIRING_STORE: pairing_store,
                 DATA_STORE: mock_storage,
@@ -832,7 +830,7 @@ class TestEventTimestamps:
     async def test_history_uses_event_time(self):
         hass, _ = await self._post(self._payload(timestamp=self.TS_MS))
         history = next(iter(hass.data[DOMAIN].values()))[DATA_HISTORY_STORE]
-        entries = history.get_or_create("TestPlayer").get("DEATH")
+        entries = history.get_or_create("testplayer").get("DEATH")
         assert entries[0]["timestamp"] == self.TS_ISO
 
 
@@ -854,7 +852,7 @@ class TestCollectionLogEvent:
         assert acct.last_collection_log["itemName"] == "Abyssal whip"
         assert acct.event_totals["COLLECTIONLOG"]["count"] == 1
         history = next(iter(hass.data[DOMAIN].values()))[DATA_HISTORY_STORE]
-        entry = history.get_or_create("TestPlayer").get("COLLECTIONLOG")[0]
+        entry = history.get_or_create("testplayer").get("COLLECTIONLOG")[0]
         assert entry["summary"] == "New collection log item: Abyssal whip (KC 312)"
 
     @pytest.mark.asyncio
@@ -866,7 +864,7 @@ class TestCollectionLogEvent:
         }
         await OsrsEventsView().post(_make_json_request(hass, payload, token))
         history = next(iter(hass.data[DOMAIN].values()))[DATA_HISTORY_STORE]
-        entry = history.get_or_create("TestPlayer").get("COLLECTIONLOG")[0]
+        entry = history.get_or_create("testplayer").get("COLLECTIONLOG")[0]
         assert entry["summary"] == "New collection log item: Mystery"
 
     def test_collection_log_persisted(self):

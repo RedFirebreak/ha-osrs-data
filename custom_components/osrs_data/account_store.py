@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,6 +22,18 @@ from .const import (
 
 _MAX_PREVIOUS_NAMES = 10
 
+# Snapshot sections (parsed key -> AccountState attribute).  The plugin's
+# per-connection filters can leave any of them out; a missing section
+# keeps its last known value.
+SNAPSHOT_SECTIONS: dict[str, str] = {
+    "inventory": "inventory",
+    "equipment": "equipment",
+    "health": "health",
+    "prayerPoints": "prayer_points",
+    "location": "location",
+    "spellbook": "spellbook",
+}
+
 
 def _normalize_player_name(name: str) -> str:
     """Normalize an RSN to a stable key (lowercase, collapse whitespace)."""
@@ -34,6 +47,23 @@ def _as_epoch_ms(value: Any) -> int | None:
     if value <= 0:
         return None
     return int(value)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _snapshot_ts(value: Any) -> int | None:
+    """Return a payload ``timestamp`` as epoch millis, clamped to now.
+
+    The timestamp comes from the player's PC clock.  Clamping keeps a
+    clock that runs ahead from storing a future time that would make
+    every later snapshot look stale.
+    """
+    ts = _as_epoch_ms(value)
+    if ts is None:
+        return None
+    return min(ts, _now_ms())
 
 
 def _level_from_xp(xp: int) -> int:
@@ -102,6 +132,9 @@ class AccountState:
         # Spellbook: {id: int, name: str}
         self.spellbook: dict[str, Any] = {"id": 0, "name": ""}
 
+        # SNAPSHOT_SECTIONS keys that the latest applied snapshot contained
+        self.received_sections: set[str] = set()
+
         # Events: list (future use, initially empty)
         self.events: list[Any] = []
 
@@ -132,23 +165,39 @@ class AccountState:
         # Plugin version from the X-Osrs-Exporter-Version header
         self.plugin_version: str | None = None
 
-        # Root ``timestamp`` (epoch ms) of the newest applied snapshot.  The
-        # plugin can resend queued payloads late; older ones are not applied.
+        # Root ``timestamp`` (epoch ms, clamped to receive time) of the last
+        # applied snapshot.
         self.last_payload_ts: int | None = None
 
-    def is_stale(self, payload_ts: Any) -> bool:
-        """Return True if *payload_ts* is older than the last applied snapshot."""
-        ts = _as_epoch_ms(payload_ts)
-        return (
-            ts is not None
-            and self.last_payload_ts is not None
-            and ts < self.last_payload_ts
-        )
+        # Newest applied snapshot timestamp per paired device (device_id ->
+        # epoch ms).  The plugin can resend queued payloads late; older ones
+        # are not applied.  PC clocks differ, so a snapshot is only compared
+        # with snapshots from the same device.
+        self.device_payload_ts: dict[str, int] = {}
+
+    def is_stale(self, payload_ts: Any, device_id: str | None = None) -> bool:
+        """Return True if *payload_ts* is older than *device_id*'s last snapshot."""
+        ts = _snapshot_ts(payload_ts)
+        last = self.device_payload_ts.get(device_id or "")
+        return ts is not None and last is not None and ts < last
+
+    def mark_seen(self) -> None:
+        """Record that this account's client is sending data.
+
+        Called for every authenticated payload, including stale resends
+        whose snapshot is skipped, so presence never times out while data
+        is still arriving.  An explicit logout is not undone.
+        """
+        self.last_seen = datetime.now(timezone.utc)
+        if not self.is_online and self.offline_reason == "timeout":
+            self.is_online = True
+            self.offline_reason = "online"
 
     def update_player_data(
         self,
         parsed: dict[str, Any],
         player_name: str | None = None,
+        device_id: str | None = None,
     ) -> None:
         """Update from parsed base JSON player data."""
         if player_name:
@@ -158,9 +207,13 @@ class AccountState:
         self.last_update = now
         self.last_seen = datetime.now(timezone.utc)
 
-        payload_ts = _as_epoch_ms(parsed.get("timestamp"))
+        payload_ts = _snapshot_ts(parsed.get("timestamp"))
         if payload_ts is not None:
             self.last_payload_ts = payload_ts
+            key = device_id or ""
+            self.device_payload_ts[key] = max(
+                payload_ts, self.device_payload_ts.get(key, payload_ts)
+            )
 
         self.account_type = parsed.get("accountType", self.account_type)
         self.world = parsed.get("world", self.world)
@@ -175,12 +228,13 @@ class AccountState:
         # Update game state
         self.game_state = parsed.get("state", "UNKNOWN")
 
-        self.inventory = parsed.get("inventory", [])
-        self.equipment = parsed.get("equipment", {})
-        self.health = parsed.get("health", {"current": 0, "max": 0})
-        self.prayer_points = parsed.get("prayerPoints", {"current": 0, "max": 0})
-        self.location = parsed.get("location", {"x": 0, "y": 0, "plane": 0})
-        self.spellbook = parsed.get("spellbook", {"id": 0, "name": ""})
+        # A section the plugin left out keeps its last known value.
+        self.received_sections = set()
+        for section, attr in SNAPSHOT_SECTIONS.items():
+            value = parsed.get(section)
+            if value is not None:
+                setattr(self, attr, value)
+                self.received_sections.add(section)
 
         # Determine presence: default to online (heartbeat), then let
         # events override.  This block runs BEFORE skill processing so
@@ -347,6 +401,7 @@ class AccountState:
             "prayerPoints": self.prayer_points,
             "location": self.location,
             "spellbook": self.spellbook,
+            "received_sections": sorted(self.received_sections),
             "events": self.events,
             "game_state": self.game_state,
             "detail_sensors": self.detail_sensors,
@@ -361,6 +416,7 @@ class AccountState:
             "last_collection_log": self.last_collection_log,
             "plugin_version": self.plugin_version,
             "last_payload_ts": self.last_payload_ts,
+            "device_payload_ts": self.device_payload_ts,
         }
 
     def load_dict(self, data: dict[str, Any]) -> None:
@@ -378,6 +434,13 @@ class AccountState:
         self.prayer_points = data.get("prayerPoints", {"current": 0, "max": 0})
         self.location = data.get("location", {"x": 0, "y": 0, "plane": 0})
         self.spellbook = data.get("spellbook", {"id": 0, "name": ""})
+        received = data.get("received_sections")
+        # Older versions replaced every section on each snapshot.
+        self.received_sections = (
+            {s for s in received if s in SNAPSHOT_SECTIONS}
+            if isinstance(received, list)
+            else set(SNAPSHOT_SECTIONS)
+        )
         self.events = data.get("events", [])
         self.game_state = data.get("game_state", "UNKNOWN")
         self.detail_sensors = data.get("detail_sensors", {})
@@ -395,7 +458,18 @@ class AccountState:
         self.last_loot = data.get("last_loot", {})
         self.last_collection_log = data.get("last_collection_log", {})
         self.plugin_version = data.get("plugin_version")
-        self.last_payload_ts = _as_epoch_ms(data.get("last_payload_ts"))
+        # Older versions stored the timestamp unclamped; drop any future
+        # value so a PC clock that ran ahead can't block snapshots.
+        now_ms = _now_ms()
+        last_ts = _as_epoch_ms(data.get("last_payload_ts"))
+        self.last_payload_ts = last_ts if last_ts is not None and last_ts <= now_ms else None
+        self.device_payload_ts = {}
+        raw_device_ts = data.get("device_payload_ts")
+        if isinstance(raw_device_ts, dict):
+            for device_id, raw_ts in raw_device_ts.items():
+                ts = _as_epoch_ms(raw_ts)
+                if isinstance(device_id, str) and ts is not None and ts <= now_ms:
+                    self.device_payload_ts[device_id] = ts
 
 
 class AccountStore:
@@ -438,10 +512,12 @@ class AccountStore:
         if plugin_hash:
             state = self._by_plugin_hash.get(plugin_hash)
             if state is not None:
-                self._index_name(state, norm)
+                # No name indexing here: the payload may be a late resend
+                # that is never applied.  The display name (and so the
+                # name lookup) only changes when a snapshot is applied.
                 return state
 
-        state = self._by_name.get(norm)
+        state = self._find_by_name(norm)
         if state is not None:
             if plugin_hash:
                 if state.plugin_account_hash is None:
@@ -482,14 +558,27 @@ class AccountStore:
             n += 1
         return key
 
-    def _index_name(self, state: AccountState, norm: str) -> None:
-        """Point the name index at *state*, dropping its stale old name."""
-        if self._by_name.get(norm) is state:
-            return
-        old_norm = _normalize_player_name(state.player_name)
-        if self._by_name.get(old_norm) is state:
-            del self._by_name[old_norm]
-        self._by_name[norm] = state
+    def find_by_name(self, player_name: str) -> AccountState | None:
+        """Return the account currently named *player_name*, if any."""
+        return self._find_by_name(_normalize_player_name(player_name))
+
+    def _find_by_name(self, norm: str) -> AccountState | None:
+        """Return the account whose *current* display name is *norm*.
+
+        ``_by_name`` is only a cache: an entry for an account that has
+        since been renamed is ignored, so lookups always follow the names
+        of applied snapshots.  If two accounts share a name, the cached
+        (most recently created or loaded) one wins.
+        """
+        state = self._by_name.get(norm)
+        if state is not None and _normalize_player_name(state.player_name) == norm:
+            return state
+        for state in self.accounts:
+            if _normalize_player_name(state.player_name) == norm:
+                self._by_name[norm] = state
+                return state
+        self._by_name.pop(norm, None)
+        return None
 
     def get_by_hash(self, account_hash: str) -> AccountState | None:
         """Look up an account by its entity key."""
@@ -497,7 +586,7 @@ class AccountStore:
         if state is not None:
             return state
         # Fallback: check if the key is a normalized-name key
-        return self._by_name.get(account_hash)
+        return self._find_by_name(account_hash)
 
     @property
     def accounts(self) -> list[AccountState]:

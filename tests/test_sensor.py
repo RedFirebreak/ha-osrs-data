@@ -452,3 +452,64 @@ class TestUniqueIdStabilityAcrossHashMigration:
         assert info.native_value == "New Name"
         assert attrs["display_name"] == "New Name"
         assert attrs["previous_names"] == ["Zezima"]
+
+
+class TestRecentHistoryUsesAccountKey:
+    """``recent`` must come from the account's own history, not its name's."""
+
+    def test_recent_follows_account_key(self):
+        from custom_components.osrs_data.const import DATA_HISTORY_STORE, DOMAIN
+        from custom_components.osrs_data.history import HistoryStore
+
+        history = HistoryStore()
+        for event_type in ("DEATH", "LOOT", "COLLECTIONLOG"):
+            history.get_or_create("key_bob").record(event_type, "mine", {})
+            # Another account used to be called "Bob".
+            history.get_or_create("Bob").record(event_type, "someone else's", {})
+        entry = _make_entry()
+        hass = MagicMock()
+        hass.data = {DOMAIN: {entry.entry_id: {DATA_HISTORY_STORE: history}}}
+        state = AccountState("key_bob", "Bob")
+
+        for cls in (OsrsLastDeathSensor, OsrsLastLootSensor, OsrsLastCollectionLogSensor):
+            sensor = cls(entry, state, "key_bob")
+            sensor.hass = hass
+            recent = sensor.extra_state_attributes["recent"]
+            assert [e["summary"] for e in recent] == ["mine"], cls.__name__
+
+
+
+class TestReceivedAttribute:
+    """Section sensors say whether the latest snapshot contained their data."""
+
+    def test_received_follows_latest_snapshot(self):
+        from custom_components.osrs_data.sensor import (
+            OsrsHealthSensor,
+            OsrsLocationSensor,
+            OsrsPrayerPointsSensor,
+            OsrsSpellbookSensor,
+        )
+
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "inventory": [{"name": "Shark"}],
+            "equipment": {"HEAD": {"name": "Helm"}},
+            "health": {"current": 50, "max": 99},
+            "prayerPoints": {"current": 10, "max": 43},
+            "location": {"x": 1, "y": 2, "plane": 0},
+            "spellbook": {"id": 1, "name": "ancient"},
+        })
+        classes = (
+            OsrsInventorySensor, OsrsEquipmentSensor, OsrsHealthSensor,
+            OsrsPrayerPointsSensor, OsrsLocationSensor, OsrsSpellbookSensor,
+        )
+        sensors = [cls(_make_entry(), state, "hash1") for cls in classes]
+        for sensor in sensors:
+            assert sensor.extra_state_attributes["received"] is True, type(sensor).__name__
+
+        state.update_player_data({"accountType": "normal"})  # all filtered out
+
+        for sensor in sensors:
+            assert sensor.extra_state_attributes["received"] is False, type(sensor).__name__
+        assert sensors[0].native_value == 1
+        assert sensors[4].native_value == "1, 2"

@@ -6,12 +6,13 @@ CONF_TITLE = "title"
 
 # Storage
 STORAGE_VERSION = 2
+# 2.2: history keyed by account key instead of display name
+STORAGE_MINOR_VERSION = 2
 STORAGE_KEY = f"{DOMAIN}_store"
 
 # Data key for the per-entry AccountStore kept in hass.data
 DATA_ACCOUNT_STORE = "account_store"
 DATA_HISTORY_STORE = "history_store"
-DATA_DEDUPE_CACHE = "dedupe_cache"
 DATA_STORE = "store"
 DATA_PAIRING_STORE = "pairing_store"
 DATA_EVENT_DEDUPE_CACHE = "event_dedupe_cache"
@@ -23,6 +24,10 @@ SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
 PAIRING_CODE_LENGTH = 5
 PAIRING_CODE_TTL = 300  # seconds (5 minutes)
 DEVICE_TOKEN_LENGTH = 64  # hex characters
+# The pair endpoint needs no auth: limit failed attempts per client IP.
+PAIR_MAX_FAILED_ATTEMPTS = 10
+PAIR_ATTEMPT_WINDOW = 600  # seconds (10 minutes)
+DATA_PAIR_LIMITER = "_pair_limiter"  # hass.data[DOMAIN] key
 
 # Presence / online detection
 PRESENCE_TIMEOUT = 1500  # seconds (25 minutes) — fallback when no tickDelay known

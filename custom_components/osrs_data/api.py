@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,13 +26,14 @@ from .const import (
     EVENT_TYPE,
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
+    DATA_PAIR_LIMITER,
     DATA_PAIRING_STORE,
     DATA_STORE,
     PAIRING_CODE_TTL,
     SIGNAL_ACCOUNT_UPDATED,
 )
+from .pairing import PairAttemptLimiter
 from .parser.base import parse as parse_player_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -210,7 +212,41 @@ class OsrsPairView(HomeAssistantView):
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
-        """Consume a pairing code and issue a device token."""
+        """Consume a pairing code and issue a device token.
+
+        The endpoint needs no auth, so failed attempts (400/403) are
+        limited per client IP; a limited client gets a 429 with
+        Retry-After, even for a valid code.
+        """
+        hass: HomeAssistant = request.app["hass"]
+        limiter = hass.data.setdefault(DOMAIN, {}).setdefault(
+            DATA_PAIR_LIMITER, PairAttemptLimiter()
+        )
+        client = request.remote or "unknown"
+        retry_after = limiter.retry_after(client)
+        if retry_after is not None:
+            minutes = math.ceil(retry_after / 60)
+            return self.json(
+                {
+                    "ok": False,
+                    "error": (
+                        "Too many pairing attempts. Try again in "
+                        f"{minutes} minute{'s' if minutes != 1 else ''}."
+                    ),
+                },
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        response = await self._pair(request, hass)
+        if response.status in (400, 403):
+            limiter.record_failure(client)
+            if limiter.retry_after(client) is not None:
+                _LOGGER.warning("Too many failed pairing attempts from %s", client)
+        return response
+
+    async def _pair(self, request: web.Request, hass: HomeAssistant) -> web.Response:
+        """Validate the request body and consume its pairing code."""
         try:
             body = await request.json()
         except (json.JSONDecodeError, ValueError):
@@ -221,7 +257,6 @@ class OsrsPairView(HomeAssistantView):
         if not code:
             return self.json({"ok": False, "error": "Missing pairing code"}, status_code=400)
 
-        hass: HomeAssistant = request.app["hass"]
         version = _plugin_version(request)
 
         # 1. Try per-entry pairing stores first (the common path)
@@ -317,11 +352,9 @@ class OsrsEventsView(HomeAssistantView):
             player_name = parsed["name"]
             account_id = player_name
 
-            # Dedupe check
-            dedupe = entry_data.get(DATA_DEDUPE_CACHE)
-            if dedupe is not None and dedupe.is_duplicate(account_id, payload):
-                _LOGGER.debug("Dropping duplicate data for %s", account_id)
-                return self.json({"ok": True, "duplicate": True})
+            # No payload-level dedupe: a resent payload is processed again.
+            # Its snapshot is idempotent (and guarded against rolling back
+            # by is_stale), and each event is deduped by its eventId below.
 
             # The plugin's accountHash (when sent) is a lookup alias so a
             # renamed account resolves to its existing device/entities.
@@ -333,22 +366,28 @@ class OsrsEventsView(HomeAssistantView):
                 )
                 if version:
                     acct.plugin_version = version
-                # A queued payload resent after a newer one must not roll
-                # the snapshot back; its events are still processed below.
-                if acct.is_stale(parsed.get("timestamp")):
+                # Any authenticated payload shows the client is alive, even
+                # a stale resend whose snapshot is skipped below.
+                acct.mark_seen()
+                # A queued payload resent after a newer one from the same
+                # device must not roll the snapshot back; its events are
+                # still processed below.
+                if acct.is_stale(parsed.get("timestamp"), device_id):
                     _LOGGER.debug("Skipping stale snapshot for %s", player_name)
                 else:
                     old_name = acct.player_name
-                    acct.update_player_data(parsed, player_name=player_name)
-                    if old_name != player_name:
-                        # History is keyed by display name; carry it over.
-                        history = entry_data.get(DATA_HISTORY_STORE)
-                        if history is not None:
-                            history.rename(old_name, player_name)
-                        if acct.previous_names and acct.previous_names[-1] == old_name:
-                            _LOGGER.info("OSRS account %s renamed to %s", old_name, player_name)
-                # History is keyed by the account's current display name.
-                account_id = acct.player_name
+                    acct.update_player_data(
+                        parsed, player_name=player_name, device_id=device_id
+                    )
+                    if (
+                        old_name != player_name
+                        and acct.previous_names
+                        and acct.previous_names[-1] == old_name
+                    ):
+                        _LOGGER.info("OSRS account %s renamed to %s", old_name, player_name)
+                # History is keyed by the immutable account key, so it
+                # follows the account through name changes.
+                account_id = acct.account_hash
 
             event_data = _build_normalized_event(parsed)
             hass.bus.async_fire(EVENT_TYPE, event_data)
@@ -375,9 +414,16 @@ class OsrsEventsView(HomeAssistantView):
             _schedule_save(entry_data)
 
             return self.json({"ok": True})
-        except Exception as exc:
-            _LOGGER.exception("Event handling failed: %s", exc)
-            return self.json({"ok": False, "error": str(exc)}, status_code=500)
+        except Exception:  # noqa: BLE001
+            # The parser turns bad input into a 400 or skips it, so this is
+            # an internal failure.  A 5xx makes the plugin retry the payload;
+            # the retry is processed in full, except events that were
+            # already handled (deduped by eventId).
+            _LOGGER.exception("Event handling failed")
+            return self.json(
+                {"ok": False, "error": "Internal error while processing the data"},
+                status_code=500,
+            )
 
     @staticmethod
     def _handle_event(

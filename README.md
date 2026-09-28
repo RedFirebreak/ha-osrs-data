@@ -65,6 +65,8 @@ Already have the integration set up and want to pair another computer?
 
 Each pairing creates an independent device token. Existing tokens are never invalidated when new clients are added.
 
+Only one OSRS Data integration entry is supported: pair every client to that entry. Home Assistant refuses to add a second one. A duplicate entry left over from an older version is not loaded, and the log says so. Delete that entry; your data and paired clients are kept.
+
 ### Revoking a client
 
 Individual clients can be revoked without affecting others:
@@ -87,8 +89,9 @@ DELETE /api/osrs-data/devices/{device_id}
 Responses follow the plugin's delivery rules:
 
 - A revoked or unknown token returns `401`, and the plugin disables that connection.
-- Malformed payloads return `400`, and the plugin drops them without retrying.
+- A payload that is unusable as a whole (not JSON, or no player with a name) returns `400`, and the plugin drops it without retrying. A section or field with the wrong type is skipped and the rest of the payload is applied. Bad input never returns a `5xx`.
 - While the integration isn't ready, requests return `503` with `Retry-After: 60`, and the plugin pauses and retries.
+- After 10 failed pairing attempts from one IP address within 10 minutes, `/api/osrs-data/pair` returns `429` with `Retry-After` and an `error` message until the window has passed.
 
 The plugin sends its version in an `X-Osrs-Exporter-Version` header. It is shown as the account device's firmware (`sw_version`), in the Player Info `plugin_version` attribute, and in the device list (`plugin_version`, `last_seen`).
 
@@ -101,12 +104,12 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | Sensor | State | Key Attributes |
 |--------|-------|----------------|
 | **Player Info** | Player name | `display_name`, `previous_names`, `account_type`, `world`, `world_types`, `last_update`, `plugin_version`, `events` |
-| **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28) |
-| **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` |
-| **Health** | Current HP | `current`, `max`, `last_update` |
-| **Prayer Points** | Current prayer points | `current`, `max`, `last_update` |
-| **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update` |
-| **Spellbook** | Active spellbook name | `id`, `last_update` |
+| **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28), `received` |
+| **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD`; `received` |
+| **Health** | Current HP | `current`, `max`, `last_update`, `received` |
+| **Prayer Points** | Current prayer points | `current`, `max`, `last_update`, `received` |
+| **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update`, `received` |
+| **Spellbook** | Active spellbook name | `id`, `last_update`, `received` |
 | **Game State** | RuneLite client game state | `last_update` |
 | **Total Level** | Sum of all skill levels | `total_xp`, `skill_count`, `last_update` |
 | **Combat Level** | Computed OSRS combat level | `last_update` |
@@ -117,6 +120,8 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **\<EVENT\> Total** *(per event type)* | Cumulative event count | `last_fired` |
 
 Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death**, **Last Loot** and **Last Collection Log** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)). Their `timestamp` is when the event happened in game (the plugin's event timestamp), not when Home Assistant received it.
+
+The plugin's per-connection filters can leave out inventory, equipment, health, prayer points, location or spellbook. A section that is left out keeps its last known value, and that sensor's `received` attribute is `false` until the section is sent again.
 
 Collection log events only arrive when the in-game setting **Collection log – New addition notification** is on (chat or popup).
 
@@ -146,7 +151,7 @@ Account state, paired devices, and history are persisted to disk via Home Assist
 
 ### Event history
 
-Every game event (deaths, loot, level-ups, collection log items, achievement diaries, combat tasks, …) is recorded into a persistent, per-account, per-type rolling buffer. Defaults keep the last **50 deaths**, **100 loot** drops, and **50** of every other type; these limits are configurable (see [Options](#options)).
+Every game event (deaths, loot, level-ups, collection log items, achievement diaries, combat tasks, …) is recorded into a persistent, per-account, per-type rolling buffer. The buffer belongs to the account, not its display name, so it follows name changes and two accounts can't mix their history. Defaults keep the last **50 deaths**, **100 loot** drops, and **50** of every other type; these limits are configurable (see [Options](#options)).
 
 Query the history with the **`osrs_data.get_history`** service (returns a response):
 
@@ -154,9 +159,11 @@ Query the history with the **`osrs_data.get_history`** service (returns a respon
 action: osrs_data.get_history
 data:
   event_type: DEATH   # optional — omit for all types
-  account_name: myrsn # optional — omit for all accounts
+  account_name: myrsn # optional — the account's current name; omit for all accounts
   limit: 20
 ```
+
+Each returned entry's `account_name` is the account's current display name.
 
 The **Last Death** and **Last Loot** sensors also expose the most recent 10 entries via their `recent` attribute, so a dashboard can list them without calling a service (both example dashboards in [`implementation/dashboards/`](implementation/dashboards/) render these as recent loot/death tables).
 
@@ -169,21 +176,21 @@ Go to **Settings → Devices & services → OSRS Data → Configure → Edit int
 | Death history entries kept | 50 | Size of the DEATH history buffer |
 | Loot history entries kept | 100 | Size of the LOOT history buffer |
 | Default history entries kept | 50 | Buffer size for every other event type |
-| Deduplication window (seconds) | 30 | How long duplicate submissions and events without an `eventId` are suppressed |
+| Deduplication window (seconds) | 30 | How long duplicate events without an `eventId` are suppressed |
 | Presence timeout fallback (seconds) | 1500 | Offline threshold used when no `tickDelay` is known |
 
 Changing options reloads the integration so the new values take effect immediately.
 
 ### Event deduplication
 
-If the HA Exporter plugin retries a submission (e.g., due to network issues), the integration ignores exact duplicate payloads within a configurable window (30 s by default). Distinct data updates always pass through.
-
-Individual events within each payload are also deduplicated:
+The HA Exporter plugin resends payloads that failed (e.g., due to network issues). A resent payload is processed again: its snapshot is simply applied again, and its individual events are deduplicated:
 
 - If an event carries an `eventId` (or legacy `event_id`), that ID is the key. It is remembered for 15 minutes, because the plugin can queue and resend events for up to 10 minutes while it backs off.
 - Otherwise a composite signature of account, event type and event data is used, with the configurable window.
 
-The plugin also stamps every payload with a `timestamp`. When it resends an older queued payload after a newer one has arrived, the older snapshot is not applied, so inventory, skills and presence never roll back. Its events are still processed.
+The plugin also stamps every payload with a `timestamp`. When it resends an older queued payload after a newer one from the same RuneLite client has arrived, the older snapshot is not applied, so inventory and skills never roll back. Its events are still processed, and the account stays online while data arrives.
+
+The timestamp comes from the player's PC clock, which can be wrong. A timestamp in the future is treated as the time Home Assistant received the payload, and snapshots are only compared with earlier ones from the same paired client, so clients whose clocks differ are applied in the order they arrive.
 
 ### Event types
 
@@ -528,6 +535,10 @@ The [`implementation/`](implementation/) folder contains ready-to-use Home Assis
 
 See the [implementation README](implementation/README.md) for full installation and usage instructions, including the dashboard [prerequisites](implementation/README.md#installing-the-dashboards) and an optional multi-account dropdown.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## Project Structure
 
 ```
@@ -539,6 +550,7 @@ tests/                          # Automated test suite
 ## Privacy & Security
 
 - Pairing codes are one-time-use and expire after 5 minutes.
+- Failed pairing attempts are rate limited per IP address (10 per 10 minutes).
 - Device tokens are scoped per client and hashed (SHA-256) at rest.
 - Individual clients can be revoked without affecting others.
 - No HA access tokens or webhook secrets are ever exposed to the plugin.

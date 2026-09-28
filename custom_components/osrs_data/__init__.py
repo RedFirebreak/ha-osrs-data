@@ -22,7 +22,6 @@ from .const import (
     DOMAIN,
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_PAIRING_STORE,
     DATA_STORE,
@@ -40,7 +39,7 @@ from .const import (
     PRESENCE_TIMEOUT,
     SIGNAL_ACCOUNT_UPDATED,
 )
-from .dedupe import DedupeCache, EventDedupeCache
+from .dedupe import EventDedupeCache
 from .history import HistoryStore
 from .pairing import PairingStore
 from .storage import get_store
@@ -62,6 +61,23 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OSRS Data from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
+    # Only one entry is supported (manifest ``single_config_entry``): all
+    # entries would share one storage file, and the HTTP views only serve
+    # the first one.  A duplicate left over from an older version is not
+    # set up, so it can't overwrite the first entry's data.
+    loaded = [
+        entry_id
+        for entry_id in hass.data[DOMAIN]
+        if not (isinstance(entry_id, str) and entry_id.startswith("_"))
+    ]
+    if any(entry_id != entry.entry_id for entry_id in loaded):
+        _LOGGER.error(
+            "Only one OSRS Data integration entry is supported; delete the "
+            "duplicate entry '%s' (paired clients and data are kept)",
+            entry.title,
+        )
+        return False
 
     # Resolve configurable options (defaults preserve prior behavior).
     opts = entry.options
@@ -110,7 +126,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
-        DATA_DEDUPE_CACHE: DedupeCache(ttl=dedupe_ttl),
         DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(ttl=dedupe_ttl),
         DATA_PAIRING_STORE: pairing_store,
         DATA_STORE: store,
@@ -198,20 +213,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             event_type = event_type.upper()
         limit = call.data.get("limit", 20)
 
-        if account_name:
-            keys = [account_name]
-        else:
-            keys = [acct.player_name for acct in acct_store.accounts]
-
-        entries: list[dict] = []
-        for key in keys:
-            hist = history_store.get_or_create(key)
-            items = hist.get(event_type) if event_type else hist.all_entries()
-            for item in items:
-                entries.append({**item, "account_name": key})
-
-        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
-        return {"entries": entries[:limit]}
+        return {
+            "entries": _history_entries(
+                acct_store, history_store, account_name, event_type, limit
+            )
+        }
 
     if not hass.services.has_service(DOMAIN, "get_history"):
         hass.services.async_register(
@@ -273,6 +279,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _history_entries(
+    account_store: AccountStore,
+    history_store: HistoryStore,
+    account_name: str | None,
+    event_type: str | None,
+    limit: int,
+) -> list[dict]:
+    """Return history entries, newest first, for the ``get_history`` service.
+
+    History is keyed by account key; the service takes and returns the
+    account's current display name.  A name no account has any more
+    falls back to history still stored under that name.
+    """
+    if account_name:
+        acct = account_store.find_by_name(account_name)
+        targets = (
+            [(acct.account_hash, acct.player_name)]
+            if acct is not None
+            else [(account_name, account_name)]
+        )
+    else:
+        targets = [(acct.account_hash, acct.player_name) for acct in account_store.accounts]
+
+    entries: list[dict] = []
+    for key, name in targets:
+        hist = history_store.get_or_create(key)
+        items = hist.get(event_type) if event_type else hist.all_entries()
+        entries.extend({**item, "account_name": name} for item in items)
+
+    entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    return entries[:limit]
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the config entry when its options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
@@ -313,8 +352,17 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle removal (deletion) of a config entry.
 
     This fires *after* async_unload_entry and removes persisted storage
-    so the next install starts completely fresh.
+    so the next install starts completely fresh.  The storage is shared,
+    so it is kept while another (duplicate) entry still exists.
     """
+    others = [
+        other
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ]
+    if others:
+        _LOGGER.info("OSRS Data storage kept: another entry still uses it")
+        return
     store = get_store(hass)
     await store.async_remove()
     _LOGGER.info("OSRS Data storage removed for deleted entry")

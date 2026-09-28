@@ -131,3 +131,102 @@ class TestHistoryStore:
         assert len(h1_restored.get("LOOT")) == 1
         assert len(h1_restored.get("DEATH")) == 1
         assert h1_restored.get("LOOT")[0]["summary"] == "loot1"
+
+
+# ── History keyed by account key (storage 2.1 -> 2.2) ───────────────
+
+
+import copy  # noqa: E402
+
+from custom_components.osrs_data import _history_entries  # noqa: E402
+from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
+from custom_components.osrs_data.storage import migrate_storage_data  # noqa: E402
+
+HASH_A = "a" * 56
+HASH_B = "b" * 56
+
+STORED_2_1: dict = {
+    "accounts": [
+        # Legacy name-keyed account, renamed after it linked its hash
+        {"account_hash": "zezima", "player_name": "Zezima Jr", "plugin_account_hash": HASH_A},
+        {"account_hash": HASH_B, "player_name": "Bob", "plugin_account_hash": HASH_B},
+        # Very old entry without a stored key
+        {"player_name": "Legacy"},
+    ],
+    "history": {
+        "Zezima Jr": {"DEATH": [{"timestamp": "2026-01-02", "summary": "z2"}]},
+        "zezima jr": {"DEATH": [{"timestamp": "2026-01-01", "summary": "z1"}]},
+        "Bob": {"LOOT": [{"timestamp": "2026-01-03", "summary": "b1"}]},
+        "Legacy": {"DEATH": [{"timestamp": "2026-01-04", "summary": "l1"}]},
+        # No account has this name any more; keep it as it was.
+        "Gone": {"DEATH": [{"timestamp": "2026-01-05", "summary": "g1"}]},
+    },
+    "paired_devices": [{"device_id": "d1", "token_hash": "x"}],
+}
+
+
+class TestHistoryMigration:
+    def test_history_rekeyed_to_account_keys(self):
+        migrated = migrate_storage_data(2, 1, copy.deepcopy(STORED_2_1))
+        assert set(migrated["history"]) == {"zezima", HASH_B, "legacy", "Gone"}
+        deaths = migrated["history"]["zezima"]["DEATH"]
+        assert [e["summary"] for e in deaths] == ["z1", "z2"]
+        assert migrated["accounts"] == STORED_2_1["accounts"]
+        assert migrated["paired_devices"] == STORED_2_1["paired_devices"]
+
+    def test_version_1_data_is_migrated(self):
+        migrated = migrate_storage_data(1, 1, copy.deepcopy(STORED_2_1))
+        assert set(migrated["history"]) == {"zezima", HASH_B, "legacy", "Gone"}
+
+    def test_migration_is_idempotent(self):
+        once = migrate_storage_data(2, 1, copy.deepcopy(STORED_2_1))
+        twice = migrate_storage_data(2, 1, copy.deepcopy(once))
+        assert twice == once
+
+    def test_newer_minor_version_left_alone(self):
+        assert migrate_storage_data(2, 3, copy.deepcopy(STORED_2_1)) == STORED_2_1
+
+    def test_migrated_history_reachable_from_accounts(self):
+        migrated = migrate_storage_data(2, 1, copy.deepcopy(STORED_2_1))
+        accounts = AccountStore()
+        accounts.load_dict(migrated["accounts"])
+        history = HistoryStore()
+        history.load_dict(migrated["history"])
+        acct = accounts.get_or_create(None, "?", plugin_hash=HASH_A)
+        assert len(history.get_or_create(acct.account_hash).get("DEATH")) == 2
+
+
+class TestHistoryService:
+    """``osrs_data.get_history`` takes and returns display names."""
+
+    def _stores(self):
+        accounts = AccountStore()
+        alice = accounts.get_or_create(None, "Alice", plugin_hash=HASH_A)
+        bob = accounts.get_or_create(None, "Bob", plugin_hash=HASH_B)
+        history = HistoryStore()
+        history.get_or_create(alice.account_hash).record("DEATH", "a1", {}, timestamp="2026-01-01")
+        history.get_or_create(bob.account_hash).record("LOOT", "b1", {}, timestamp="2026-01-02")
+        history.get_or_create("Gone").record("DEATH", "g1", {}, timestamp="2026-01-03")
+        return accounts, history
+
+    def test_filter_by_current_name(self):
+        accounts, history = self._stores()
+        entries = _history_entries(accounts, history, "alice", None, 20)
+        assert [(e["summary"], e["account_name"]) for e in entries] == [("a1", "Alice")]
+
+    def test_all_accounts_newest_first(self):
+        accounts, history = self._stores()
+        entries = _history_entries(accounts, history, None, None, 20)
+        assert [(e["summary"], e["account_name"]) for e in entries] == [
+            ("b1", "Bob"), ("a1", "Alice"),
+        ]
+
+    def test_event_type_and_limit(self):
+        accounts, history = self._stores()
+        assert _history_entries(accounts, history, None, "LOOT", 20)[0]["summary"] == "b1"
+        assert len(_history_entries(accounts, history, None, None, 1)) == 1
+
+    def test_history_without_account_found_by_old_name(self):
+        accounts, history = self._stores()
+        entries = _history_entries(accounts, history, "Gone", None, 20)
+        assert [(e["summary"], e["account_name"]) for e in entries] == [("g1", "Gone")]

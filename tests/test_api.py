@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -57,16 +60,16 @@ from custom_components.osrs_data.api import (  # noqa: E402
 from custom_components.osrs_data.account_store import AccountStore  # noqa: E402
 from custom_components.osrs_data.const import (  # noqa: E402
     DATA_ACCOUNT_STORE,
-    DATA_DEDUPE_CACHE,
     DATA_EVENT_DEDUPE_CACHE,
     DATA_HISTORY_STORE,
     DATA_PAIRING_STORE,
     DATA_STORE,
     DOMAIN,
 )
-from custom_components.osrs_data.dedupe import DedupeCache, EventDedupeCache  # noqa: E402
+from custom_components.osrs_data.dedupe import EventDedupeCache  # noqa: E402
 from custom_components.osrs_data.history import HistoryStore  # noqa: E402
 from custom_components.osrs_data.pairing import PairingStore  # noqa: E402
+from tests.test_parsers import FUZZ_BASE, FUZZ_PATHS, FUZZ_VALUES, fuzzed  # noqa: E402
 
 
 # ── Sample payloads ──────────────────────────────────────────────────
@@ -111,7 +114,6 @@ def _make_hass_with_pairing():
             entry_id: {
                 DATA_ACCOUNT_STORE: store,
                 DATA_HISTORY_STORE: HistoryStore(),
-                DATA_DEDUPE_CACHE: DedupeCache(),
                 DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(),
                 DATA_PAIRING_STORE: pairing_store,
                 DATA_STORE: mock_storage,
@@ -301,26 +303,44 @@ class TestOsrsEventsView:
         mock_storage.async_delay_save.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_events_deduplication(self):
-        """Duplicate events are detected."""
+    async def test_identical_resend_fires_each_event_once(self):
+        """A resent payload is processed again; its events are deduped by id."""
         hass, _, pairing_store, _ = _make_hass_with_pairing()
         code = pairing_store.create_pairing_code()
         pair_result = pairing_store.consume_pairing_code(code)
         token = pair_result["token"]
+        payload = {
+            **BASE_PAYLOAD,
+            "events": [{"type": "death", "eventId": "dup-1", "data": {"killerName": "Jad"}}],
+        }
 
         view = OsrsEventsView()
         r1 = await view.post(
-            _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token})
+            _make_json_request(hass, payload, headers={"X-Osrs-Token": token})
         )
         r2 = await view.post(
-            _make_json_request(hass, BASE_PAYLOAD, headers={"X-Osrs-Token": token})
+            _make_json_request(hass, payload, headers={"X-Osrs-Token": token})
         )
 
-        body1 = json.loads(r1.body)
-        body2 = json.loads(r2.body)
-        assert body1["ok"] is True
-        assert body2["ok"] is True
-        assert body2.get("duplicate") is True
+        assert json.loads(r1.body) == {"ok": True}
+        assert json.loads(r2.body) == {"ok": True}
+        fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
+        assert [f.get("event_type") for f in fired].count("DEATH") == 1
+
+    @pytest.mark.asyncio
+    async def test_identical_heartbeat_refreshes_presence(self):
+        """Older plugins send no timestamp, so an idle heartbeat is identical."""
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        pair = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+        view = OsrsEventsView()
+        headers = {"X-Osrs-Token": pair["token"]}
+        await view.post(_make_json_request(hass, BASE_PAYLOAD, headers=headers))
+        acct = store.get_or_create(None, "PlayerOne")
+        acct.last_seen = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        await view.post(_make_json_request(hass, BASE_PAYLOAD, headers=headers))
+
+        assert datetime.now(timezone.utc) - acct.last_seen < timedelta(minutes=1)
 
 
 class TestEventsAccountHash:
@@ -369,9 +389,71 @@ class TestEventsAccountHash:
         assert acct.previous_names == ["OldName"]
         dispatched = {c.args[2] for c in send.call_args_list}
         assert dispatched == {"oldname"}
-        deaths = history.get_or_create("NewName").get("DEATH")
+        # History is keyed by the account key, so the rename doesn't move it.
+        deaths = history.get_or_create("oldname").get("DEATH")
         assert [d["data"]["killerName"] for d in deaths] == ["Jad", "Zuk"]
-        assert "OldName" not in history.to_dict()
+        assert set(history.to_dict()) == {"oldname"}
+
+    @pytest.mark.asyncio
+    async def test_name_swap_keeps_histories_apart(self):
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        token = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())["token"]
+        history = hass.data[DOMAIN]["test_entry"][DATA_HISTORY_STORE]
+        hash_a, hash_b = "a" * 56, "b" * 56
+        for name, account_hash, ts, killer in (
+            ("Alice", hash_a, 1_000, "a1"),
+            ("Bob", hash_b, 1_000, "b1"),
+            ("Bob", hash_a, 2_000, "a2"),    # A takes the name Bob ...
+            ("Alice", hash_b, 2_000, "b2"),  # ... and B takes Alice
+        ):
+            payload = {
+                **self._payload(name, account_hash),
+                "timestamp": ts,
+                "events": [{"type": "death", "eventId": killer, "data": {"killerName": killer}}],
+            }
+            assert (await self._post(hass, token, payload)).status == 200
+
+        a = store.get_or_create(None, "?", plugin_hash=hash_a)
+        b = store.get_or_create(None, "?", plugin_hash=hash_b)
+        assert (a.player_name, b.player_name) == ("Bob", "Alice")
+
+        def killers(acct):
+            deaths = history.get_or_create(acct.account_hash).get("DEATH")
+            return [d["data"]["killerName"] for d in deaths]
+
+        assert killers(a) == ["a1", "a2"]
+        assert killers(b) == ["b1", "b2"]
+
+    async def _renamed_then_late_resend(self):
+        """Rename OldName -> NewName, then deliver a queued OldName payload."""
+        hass, store, pairing_store, _ = _make_hass_with_pairing()
+        token = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())["token"]
+        for name, ts in (("OldName", 1_000), ("NewName", 3_000), ("OldName", 2_000)):
+            payload = {**self._payload(name, self.HASH), "timestamp": ts}
+            assert (await self._post(hass, token, payload)).status == 200
+        acct = store.accounts[0]
+        assert acct.player_name == "NewName"
+        return hass, store, token, acct
+
+    @pytest.mark.asyncio
+    async def test_late_resend_old_name_without_hash_is_another_account(self):
+        hass, store, token, acct = await self._renamed_then_late_resend()
+        await self._post(hass, token, {**self._payload("OldName"), "timestamp": 4_000})
+        assert acct.player_name == "NewName"
+        assert len(store.accounts) == 2
+
+    @pytest.mark.asyncio
+    async def test_late_resend_current_name_without_hash_resolves_account(self):
+        hass, store, token, acct = await self._renamed_then_late_resend()
+        await self._post(hass, token, {**self._payload("NewName"), "timestamp": 4_000})
+        assert store.accounts == [acct]
+
+    @pytest.mark.asyncio
+    async def test_late_resend_current_name_with_hash_resolves_account(self):
+        hass, store, token, acct = await self._renamed_then_late_resend()
+        await self._post(hass, token, {**self._payload("NewName", self.HASH), "timestamp": 4_000})
+        assert store.accounts == [acct]
+        assert store.get_or_create(None, "NewName") is acct
 
     @pytest.mark.asyncio
     async def test_payload_without_hash_unchanged(self):
@@ -692,6 +774,48 @@ class TestBadInputIs4xx:
         assert any(f.get("event_type") == "DEATH" for f in fired)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", FUZZ_PATHS, ids=lambda p: ".".join(map(str, p)))
+    async def test_wrong_types_never_return_5xx(self, path):
+        for value in FUZZ_VALUES:
+            hass, store, _, pair = _paired(_make_hass_with_pairing())
+            result = await _post_events(hass, pair["token"], fuzzed(path, value))
+            assert result.status == 200, (value, result.body)
+            for acct in store.accounts:
+                # What the sensors compute must work on whatever was stored.
+                assert acct.total_level >= 0
+                acct.combat_level  # noqa: B018
+
+    @pytest.mark.asyncio
+    async def test_unusable_player_returns_400(self):
+        for bad in (7, True, ["P"], {"n": "P"}, "   "):
+            hass, store, _, pair = _paired(_make_hass_with_pairing())
+            result = await _post_events(hass, pair["token"], {"player": {"name": bad}})
+            assert result.status == 400, bad
+            assert store.accounts == []
+
+    @pytest.mark.asyncio
+    async def test_retry_after_failure_is_processed(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        payload = {
+            "player": {"name": "PlayerOne"},
+            "events": [{"type": "death", "eventId": "retry-1", "data": {"killerName": "Jad"}}],
+            "timestamp": 1_000,
+        }
+        # A transient failure while handling the payload -> 500, so the
+        # plugin retries it.
+        hass.bus.async_fire.side_effect = [RuntimeError("bus unavailable")] + [None] * 10
+        first = await _post_events(hass, pair["token"], payload)
+        assert first.status == 500
+
+        retry = await _post_events(hass, pair["token"], payload)
+
+        assert retry.status == 200
+        assert "duplicate" not in json.loads(retry.body)
+        fired = [c.args[1] for c in hass.bus.async_fire.call_args_list]
+        assert any(f.get("event_type") == "DEATH" for f in fired)
+        assert store.get_or_create(None, "PlayerOne").event_totals["DEATH"]["count"] == 1
+
+    @pytest.mark.asyncio
     async def test_pair_non_string_code_returns_400(self):
         hass, _, _, _ = _make_hass_with_pairing()
         request = _make_json_request(hass, {"code": 12345})
@@ -804,3 +928,217 @@ class TestStaleSnapshot:
         legacy = {"player": {"name": "PlayerOne", "world": "310"}, "events": []}
         await _post_events(hass, pair["token"], legacy)
         assert store.get_or_create(None, "PlayerOne").world == "310"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class TestSnapshotClockSkew:
+    """Payload timestamps come from the player's PC clock, which can be wrong."""
+
+    HOUR_MS = 3_600_000
+    DAY_MS = 86_400_000
+
+    def _payload(self, ts, world, events=None):
+        return {
+            "player": {"name": "PlayerOne", "world": world},
+            "events": events or [],
+            "timestamp": ts,
+        }
+
+    @pytest.mark.asyncio
+    async def test_future_timestamp_does_not_freeze_snapshots(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(_now_ms() + self.DAY_MS, "302"))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.last_payload_ts <= _now_ms()
+        # The PC clock is corrected; its next snapshot carries the real time.
+        await _post_events(hass, pair["token"], self._payload(_now_ms(), "303"))
+        assert acct.world == "303"
+
+    @pytest.mark.asyncio
+    async def test_devices_with_skewed_clocks_apply_in_arrival_order(self):
+        hass, store, pairing_store, fast = _paired(_make_hass_with_pairing())
+        slow = pairing_store.consume_pairing_code(pairing_store.create_pairing_code())
+        await _post_events(hass, fast["token"], self._payload(_now_ms() + self.HOUR_MS, "302"))
+        await _post_events(hass, slow["token"], self._payload(_now_ms() - 60_000, "303"))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.world == "303"
+        # A device is still guarded against its own late resends.
+        await _post_events(hass, slow["token"], self._payload(_now_ms() - 120_000, "304"))
+        assert acct.world == "303"
+
+    @pytest.mark.asyncio
+    async def test_stale_resend_refreshes_presence(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302"))
+        acct = store.get_or_create(None, "PlayerOne")
+        acct.last_seen = datetime.now(timezone.utc) - timedelta(hours=1)
+        acct.is_online = False
+        acct.offline_reason = "timeout"
+
+        result = await _post_events(hass, pair["token"], self._payload(1_000, "999"))
+
+        assert result.status == 200
+        assert acct.world == "302"  # the stale snapshot itself is still skipped
+        assert acct.is_online is True
+        assert acct.offline_reason == "online"
+        assert datetime.now(timezone.utc) - acct.last_seen < timedelta(minutes=1)
+
+    @pytest.mark.asyncio
+    async def test_stale_resend_does_not_undo_logout(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302", [{"type": "LOGOUT"}]))
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.is_online is False
+
+        await _post_events(hass, pair["token"], self._payload(1_000, "302"))
+
+        assert acct.is_online is False
+        assert acct.offline_reason == "logout"
+
+    @pytest.mark.asyncio
+    async def test_persisted_future_timestamp_cleared_on_load(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        store.load_dict([{
+            "account_hash": "playerone",
+            "player_name": "PlayerOne",
+            "world": "302",
+            "last_payload_ts": _now_ms() + self.DAY_MS,
+        }])
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.last_payload_ts is None
+
+        await _post_events(hass, pair["token"], self._payload(_now_ms(), "303"))
+        assert acct.world == "303"
+
+    @pytest.mark.asyncio
+    async def test_device_timestamps_survive_restart(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._payload(2_000, "302"))
+
+        restarted = AccountStore()
+        restarted.load_dict(store.to_dict())
+        hass.data[DOMAIN]["test_entry"][DATA_ACCOUNT_STORE] = restarted
+        await _post_events(hass, pair["token"], self._payload(1_000, "999"))
+
+        assert restarted.get_or_create(None, "PlayerOne").world == "302"
+
+
+SECTIONS = ("inventory", "equipment", "health", "prayerPoints", "location", "spellbook")
+SECTION_ATTRS = ("inventory", "equipment", "health", "prayer_points", "location", "spellbook")
+
+
+class TestFilteredSections:
+    """The plugin's per-connection filters can leave sections out."""
+
+    def _full(self):
+        payload = copy.deepcopy(FUZZ_BASE)
+        payload["events"] = []
+        del payload["timestamp"]
+        return payload
+
+    def _without_sections(self):
+        payload = self._full()
+        for section in SECTIONS:
+            del payload["player"][section]
+        payload["player"]["world"] = "303"
+        return payload
+
+    @pytest.mark.asyncio
+    async def test_missing_sections_keep_last_known_values(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._full())
+        acct = store.get_or_create(None, "PlayerOne")
+        before = {attr: copy.deepcopy(getattr(acct, attr)) for attr in SECTION_ATTRS}
+        assert acct.location == {"x": 3200, "y": 3200, "plane": 0}
+
+        await _post_events(hass, pair["token"], self._without_sections())
+
+        assert acct.world == "303"  # the snapshot itself was applied
+        for attr, value in before.items():
+            assert getattr(acct, attr) == value, attr
+        assert acct.received_sections == set()
+
+    @pytest.mark.asyncio
+    async def test_sections_received_again(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._full())
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.received_sections == set(SECTIONS)
+        await _post_events(hass, pair["token"], self._without_sections())
+        await _post_events(hass, pair["token"], self._full())
+        assert acct.received_sections == set(SECTIONS)
+
+    @pytest.mark.asyncio
+    async def test_empty_section_still_clears(self):
+        hass, store, _, pair = _paired(_make_hass_with_pairing())
+        await _post_events(hass, pair["token"], self._full())
+        emptied = self._full()
+        emptied["player"]["inventory"] = {"items": []}
+        await _post_events(hass, pair["token"], emptied)
+        acct = store.get_or_create(None, "PlayerOne")
+        assert acct.inventory == []
+        assert "inventory" in acct.received_sections
+
+
+class TestPairRateLimit:
+    """/api/osrs-data/pair needs no auth, so failed codes are limited per IP."""
+
+    IP = "203.0.113.7"
+
+    def _request(self, hass, code, ip=IP):
+        request = _make_json_request(hass, {"code": code})
+        request.remote = ip
+        return request
+
+    async def _fail(self, hass, view, times, ip=IP):
+        for _ in range(times):
+            assert (await view.post(self._request(hass, "00000", ip))).status == 403
+
+    @pytest.mark.asyncio
+    async def test_eleventh_attempt_after_ten_failures_is_limited(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        await self._fail(hass, view, 10)
+
+        # Even a valid code is refused while the IP is limited.
+        code = pairing_store.create_pairing_code()
+        result = await view.post(self._request(hass, code))
+
+        assert result.status == 429
+        body = json.loads(result.body)
+        assert body["ok"] is False
+        assert "Too many pairing attempts" in body["error"]
+        assert 0 < int(result.headers["Retry-After"]) <= 600
+
+    @pytest.mark.asyncio
+    async def test_other_ip_is_not_limited(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        await self._fail(hass, view, 10)
+        code = pairing_store.create_pairing_code()
+        result = await view.post(self._request(hass, code, ip="198.51.100.1"))
+        assert result.status == 200
+
+    @pytest.mark.asyncio
+    async def test_successful_pairings_are_not_counted(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        for _ in range(12):
+            code = pairing_store.create_pairing_code()
+            assert (await view.post(self._request(hass, code))).status == 200
+
+    @pytest.mark.asyncio
+    async def test_limit_expires_after_window(self):
+        hass, _, pairing_store, _ = _make_hass_with_pairing()
+        view = OsrsPairView()
+        clock = [1_000.0]
+        with patch("custom_components.osrs_data.pairing.time.monotonic", lambda: clock[0]):
+            await self._fail(hass, view, 10)
+            clock[0] += 599
+            assert (await view.post(self._request(hass, "00000"))).status == 429
+            clock[0] += 2
+            code = pairing_store.create_pairing_code()
+            assert (await view.post(self._request(hass, code))).status == 200

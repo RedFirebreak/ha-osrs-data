@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import secrets
 import time
+from collections import deque
 from typing import Any
 
-from .const import PAIRING_CODE_LENGTH, PAIRING_CODE_TTL, DEVICE_TOKEN_LENGTH
+from .const import (
+    DEVICE_TOKEN_LENGTH,
+    PAIR_ATTEMPT_WINDOW,
+    PAIR_MAX_FAILED_ATTEMPTS,
+    PAIRING_CODE_LENGTH,
+    PAIRING_CODE_TTL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def _generate_pairing_code() -> str:
-    """Generate a random 6-digit numeric pairing code."""
+    """Generate a random numeric pairing code of PAIRING_CODE_LENGTH (5) digits."""
     return "".join([str(secrets.randbelow(10)) for _ in range(PAIRING_CODE_LENGTH)])
 
 
@@ -223,3 +231,43 @@ class PairingStore:
             device = PairedDevice.from_dict(device_data)
             self._devices[device.device_id] = device
             self._token_index[device.token_hash] = device.device_id
+
+
+class PairAttemptLimiter:
+    """Sliding-window limit on failed pairing attempts per client IP.
+
+    Only failed attempts count, so pairing several clients from one
+    network is never blocked; guessing codes is.
+    """
+
+    def __init__(
+        self,
+        max_failures: int = PAIR_MAX_FAILED_ATTEMPTS,
+        window: float = PAIR_ATTEMPT_WINDOW,
+    ) -> None:
+        self._max_failures = max_failures
+        self._window = window
+        self._failures: dict[str, deque[float]] = {}
+
+    def retry_after(self, client: str) -> int | None:
+        """Seconds until *client* may try again, or None if it isn't limited."""
+        now = time.monotonic()
+        self._evict(now)
+        failures = self._failures.get(client)
+        if failures is None or len(failures) < self._max_failures:
+            return None
+        return max(1, math.ceil(failures[0] + self._window - now))
+
+    def record_failure(self, client: str) -> None:
+        """Count a failed pairing attempt from *client*."""
+        self._failures.setdefault(client, deque()).append(time.monotonic())
+
+    def _evict(self, now: float) -> None:
+        """Forget failures older than the window."""
+        cutoff = now - self._window
+        for client in list(self._failures):
+            failures = self._failures[client]
+            while failures and failures[0] <= cutoff:
+                failures.popleft()
+            if not failures:
+                del self._failures[client]

@@ -111,6 +111,23 @@ class TestAccountStatePersistence:
         assert restored.game_state == "LOGGED_IN"
 
 
+    def test_received_sections_roundtrip(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({"inventory": [], "location": {"x": 1, "y": 2, "plane": 0}})
+        restored = AccountState("hash1", "Player")
+        restored.load_dict(state.to_dict())
+        assert restored.received_sections == {"inventory", "location"}
+
+    def test_legacy_data_counts_every_section_received(self):
+        """Older versions replaced every section on each snapshot."""
+        restored = AccountState("hash1", "Player")
+        restored.load_dict({"player_name": "Player", "inventory": [{"name": "Shark"}]})
+        assert restored.received_sections == {
+            "inventory", "equipment", "health", "prayerPoints", "location", "spellbook",
+        }
+        assert restored.inventory == [{"name": "Shark"}]
+
+
 class TestAccountStorePersistence:
     def test_roundtrip_empty_store(self):
         """An empty store roundtrips to an empty list."""
