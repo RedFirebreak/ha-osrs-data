@@ -11,3 +11,4 @@
 - **Event history:** history is stored per account instead of per display name, so two accounts that swap names keep separate history. Existing history is migrated on startup.
 - **Filtered sections:** when the plugin's filters leave out inventory, equipment, health, prayer points, location or spellbook, the sensor keeps its last known value instead of showing an empty inventory or position 0, 0. A new `received` attribute shows whether the latest update contained the section.
 - **Pairing:** failed pairing attempts are rate limited (10 per IP address per 10 minutes; `429` with `Retry-After`).
+- **Presence timeout:** the periodic check that marks accounts offline now runs in Home Assistant's event loop instead of a worker thread. Recent Home Assistant versions log a thread-safety error for it ("calls async_dispatcher_send from a thread other than the event loop"), and accounts were not always marked offline.
