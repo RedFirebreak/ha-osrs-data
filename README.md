@@ -587,3 +587,10 @@ tests/                          # Automated test suite
 - [Config Flow](https://developers.home-assistant.io/docs/config_entries_config_flow_handler/)
 - [Options Flow](https://developers.home-assistant.io/docs/config_entries_options_flow_handler/)
 - [Blueprint Documentation](https://www.home-assistant.io/docs/automation/using_blueprints/)
+
+## License
+
+Apache License 2.0 (see [LICENSE](LICENSE)), Copyright 2026 RedFirebreak. You may use, change and
+redistribute it, including commercially. If you do, keep the [NOTICE](NOTICE) file and credit
+RedFirebreak with a link to https://github.com/RedFirebreak/ha-osrs-data. GitHub's "Cite this repository" button uses
+[CITATION.cff](CITATION.cff).

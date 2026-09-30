@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "OSRS Data (ha-osrs-data)"
+abstract: "A Home Assistant integration that receives Old School RuneScape account data from the HA Exporter RuneLite plugin."
+authors:
+  - name: "RedFirebreak"
+repository-code: "https://github.com/RedFirebreak/ha-osrs-data"
+url: "https://github.com/RedFirebreak/ha-osrs-data"
+license: Apache-2.0
+keywords:
+  - old-school-runescape
+  - osrs
+  - runelite
+  - home-assistant
+  - hacs

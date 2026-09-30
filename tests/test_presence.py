@@ -605,3 +605,65 @@ class TestBinarySensorTickDelayAttributes:
         attrs = sensor.extra_state_attributes
         assert attrs["tick_delay"] == 20
         assert attrs["presence_timeout"] == 37
+
+
+class TestPresenceCheckCallback:
+    """The periodic presence check registered by ``async_setup_entry``."""
+
+    @staticmethod
+    def _hass_callback(func):
+        """Stand-in for ``homeassistant.core.callback``."""
+        setattr(func, "_hass_callback", True)
+        return func
+
+    async def _setup_and_capture(self):
+        import custom_components.osrs_data as integration
+        from custom_components.osrs_data.const import (
+            CONF_ICONS_BASE_URL,
+            DATA_ACCOUNT_STORE,
+            DOMAIN,
+        )
+
+        hass = MagicMock()
+        # Views are out of scope here; skip registering them.
+        hass.data = {DOMAIN: {"_views_registered": True, "_pair_view_registered": True}}
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        entry = _make_entry()
+        # Icons off: their refresh timer is not what these tests check.
+        entry.options = {CONF_ICONS_BASE_URL: ""}
+        store = MagicMock()
+        store.async_load = AsyncMock(return_value=None)
+
+        event_mod = MagicMock()
+        with patch.dict(sys.modules, {"homeassistant.helpers.event": event_mod}), \
+                patch.object(integration, "callback", self._hass_callback, create=True), \
+                patch.object(integration, "get_store", return_value=store):
+            assert await integration.async_setup_entry(hass, entry) is True
+
+        event_mod.async_track_time_interval.assert_called_once()
+        check = event_mod.async_track_time_interval.call_args[0][1]
+        account_store = hass.data[DOMAIN][entry.entry_id][DATA_ACCOUNT_STORE]
+        return integration, hass, check, account_store
+
+    @pytest.mark.asyncio
+    async def test_presence_check_runs_in_event_loop(self):
+        """Without ``@callback`` HA runs it in the executor, where
+        ``async_dispatcher_send`` is not thread safe."""
+        _, _, check, _ = await self._setup_and_capture()
+        assert getattr(check, "_hass_callback", False) is True
+
+    @pytest.mark.asyncio
+    async def test_presence_check_marks_timed_out_account_offline(self):
+        integration, hass, check, account_store = await self._setup_and_capture()
+        acct = account_store.get_or_create(None, "Player")
+        acct.update_player_data({"accountType": "normal"})
+        acct.last_seen = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        with patch.object(integration, "async_dispatcher_send") as send:
+            check(datetime.now(timezone.utc))
+
+        assert acct.is_online is False
+        assert acct.offline_reason == "timeout"
+        send.assert_called_once_with(
+            hass, integration.SIGNAL_ACCOUNT_UPDATED, acct.account_hash
+        )

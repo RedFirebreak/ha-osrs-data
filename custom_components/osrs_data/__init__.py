@@ -258,6 +258,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ── Periodic presence check ─────────────────────────────────────
     from homeassistant.helpers.event import async_track_time_interval
 
+    @callback
     def _check_presence(_now: datetime) -> None:
         """Mark accounts offline if no data received within timeout.
 
