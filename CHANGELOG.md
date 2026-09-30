@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **NOTICE and CITATION.cff:** the integration stays Apache-2.0; a `NOTICE` file (which redistributions and derivative works must keep, Apache-2.0 §4(d)) now asks for credit to RedFirebreak, and `CITATION.cff` gives the repository GitHub's "Cite this repository" button. The README has a License section.
+
 ### Fixed
 
 - **Wrong PC clock:** a payload timestamp from a clock that ran ahead no longer freezes sensors or makes the account go offline while data is still arriving. Timestamps are capped at the time Home Assistant receives them, a snapshot is only compared with earlier snapshots from the same RuneLite client, and every payload keeps the account online. A future timestamp stored by an earlier version is dropped on startup.
