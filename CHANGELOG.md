@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Game icons:** item, skill and equipment-slot icons from the icon CDN (https://icons.scapekeeper.com). Skill sensors, **Last Loot** and **Last Collection Log** show the icon as their entity picture. Inventory, equipment, loot and death items have an `icon` attribute (the right stack for coins and other stackables), and **Equipment** has `slot_icons` with the empty-slot silhouettes. The new **Icon URL** option points at a mirror, or turns icons off when it is empty. Both example dashboards show the icons.
 - **NOTICE and CITATION.cff:** the integration stays Apache-2.0; a `NOTICE` file (which redistributions and derivative works must keep, Apache-2.0 §4(d)) now asks for credit to RedFirebreak, and `CITATION.cff` gives the repository GitHub's "Cite this repository" button. The README has a License section.
 
 ### Fixed

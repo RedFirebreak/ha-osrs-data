@@ -16,6 +16,7 @@ DATA_HISTORY_STORE = "history_store"
 DATA_STORE = "store"
 DATA_PAIRING_STORE = "pairing_store"
 DATA_EVENT_DEDUPE_CACHE = "event_dedupe_cache"
+DATA_ICON_RESOLVER = "icon_resolver"
 
 # Dispatcher signal for account updates
 SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
@@ -61,8 +62,11 @@ CONF_LOOT_LIMIT = "loot_limit"
 CONF_DEFAULT_LIMIT = "default_limit"
 CONF_DEDUPE_TTL = "dedupe_ttl"
 CONF_PRESENCE_TIMEOUT = "presence_timeout"
+# Base URL of the OSRS icon CDN (see icons.py); "" turns icons off.
+CONF_ICONS_BASE_URL = "icons_base_url"
 
 DEFAULT_DEATH_LIMIT = 50
 DEFAULT_LOOT_LIMIT = 100
 DEFAULT_HISTORY_LIMIT = 50
 DEFAULT_DEDUPE_TTL = 30
+DEFAULT_ICONS_BASE_URL = "https://icons.scapekeeper.com"

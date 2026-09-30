@@ -187,6 +187,8 @@ views:
             secondary: "{{ '{:,}'.format(state_attr('sensor.osrs_myrsn_last_loot','total_value')|int(0)) }} gp"
             icon: mdi:treasure-chest
             icon_color: amber
+            # Item icon (empty when icons are off → falls back to the icon above)
+            picture: "{{ state_attr('sensor.osrs_myrsn_last_loot','entity_picture') or '' }}"
             entity: sensor.osrs_myrsn_last_loot
 
           - type: markdown
@@ -257,7 +259,7 @@ views:
               {%- set item = state_attr('sensor.osrs_myrsn_equipment', slot) %}
               {%- if item and item.name %}
               {%- set ns.any = true %}
-              - **{{ slot | capitalize }}:** {{ item.name }}
+              - {% if item.icon %}<img src="{{ item.icon }}" alt="" width="36" height="32"> {% endif %}**{{ slot | capitalize }}:** {{ item.name }}
               {%- endif %}
               {%- endfor %}
               {% if not ns.any %}
@@ -273,3 +275,16 @@ views:
                 entity: sensor.osrs_myrsn_inventory
                 attribute: slots_total
                 name: Slots total
+
+          # Item icons come from the integration's icon URL option
+          # (items without an icon, or with icons off, show their name).
+          - type: markdown
+            content: |
+              {% set items = state_attr('sensor.osrs_myrsn_inventory', 'items') or [] %}
+              {% if items | length == 0 -%}
+              _Inventory is empty._
+              {%- else -%}
+              {% for item in items -%}
+              {% if item.icon %}<img src="{{ item.icon }}" alt="{{ item.name }}" title="{{ item.name }}{{ ' x' ~ item.quantity if item.quantity > 1 }}" width="36" height="32">{% else %}{{ item.name }}{{ ' x' ~ item.quantity if item.quantity > 1 }} {% endif %}
+              {%- endfor %}
+              {%- endif %}

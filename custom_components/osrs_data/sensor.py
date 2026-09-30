@@ -17,8 +17,10 @@ from .const import (
     DOMAIN,
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
+    DATA_ICON_RESOLVER,
     SIGNAL_ACCOUNT_UPDATED,
 )
+from .icons import IconResolver
 from .parser.base import EQUIPMENT_SLOTS
 
 # Number of recent history entries surfaced on the "Last …" sensors.
@@ -136,6 +138,46 @@ class OsrsStatusSensor(SensorEntity):
 # ── Per-account device helpers ──────────────────────────────────────
 
 
+def _entry_data(sensor: SensorEntity) -> dict[str, Any] | None:
+    """Return the config entry's runtime data, or None before it's added."""
+    hass = getattr(sensor, "hass", None)
+    if hass is None:
+        return None
+    entry_data = hass.data.get(DOMAIN, {}).get(sensor._entry.entry_id)  # type: ignore[attr-defined]
+    return entry_data if isinstance(entry_data, dict) else None
+
+
+def _icon_resolver(sensor: SensorEntity) -> IconResolver | None:
+    """Return the entry's icon resolver, or None when icons are off."""
+    entry_data = _entry_data(sensor)
+    if entry_data is None:
+        return None
+    resolver = entry_data.get(DATA_ICON_RESOLVER)
+    if isinstance(resolver, IconResolver) and resolver.enabled:
+        return resolver
+    return None
+
+
+def _with_icon(item: Any, icons: IconResolver | None) -> Any:
+    """Return a copy of an item dict with an ``icon`` URL.
+
+    The URL takes the quantity into account (coins show the right
+    stack). The stored dict is never changed. An item without a known
+    id, or any item while icons are off, is returned as is (no ``icon``).
+    """
+    if icons is None or not isinstance(item, dict):
+        return item
+    url = icons.item_url(item.get("id"), item.get("quantity", 1))
+    return {**item, "icon": url} if url else item
+
+
+def _items_with_icons(items: Any, icons: IconResolver | None) -> Any:
+    """Apply :func:`_with_icon` to every item of a list."""
+    if icons is None or not isinstance(items, list):
+        return items
+    return [_with_icon(item, icons) for item in items]
+
+
 def _account_device_info(entry: ConfigEntry, state: AccountState) -> dict[str, Any]:
     """Build device_info for a per-account device."""
     info: dict[str, Any] = {
@@ -237,7 +279,7 @@ class OsrsInventorySensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs: dict[str, Any] = {
-            "items": self._state.inventory,
+            "items": _items_with_icons(self._state.inventory, _icon_resolver(self)),
             "slots_used": len(self._state.inventory),
             "slots_total": 28,
             "received": "inventory" in self._state.received_sections,
@@ -500,9 +542,16 @@ class OsrsEquipmentSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         # Always include all known slots; missing slots are empty dicts
+        # (also with icons on, so ``if item`` still means "equipped").
+        icons = _icon_resolver(self)
         attrs: dict[str, Any] = {}
         for slot in EQUIPMENT_SLOTS:
-            attrs[slot] = self._state.equipment.get(slot, {})
+            attrs[slot] = _with_icon(self._state.equipment.get(slot, {}), icons)
+        if icons is not None:
+            # Empty-slot silhouettes, for the slots that have one.
+            attrs["slot_icons"] = {
+                slot: url for slot in EQUIPMENT_SLOTS if (url := icons.slot_url(slot))
+            }
         attrs["received"] = "equipment" in self._state.received_sections
         if self._state.last_update:
             attrs["last_update"] = self._state.last_update
@@ -679,11 +728,8 @@ def _recent_history(
     sensor: SensorEntity, account_key: str, event_type: str
 ) -> list[dict[str, Any]]:
     """Return the most recent history entries for an account + event type."""
-    hass = getattr(sensor, "hass", None)
-    if hass is None:
-        return []
-    entry_data = hass.data.get(DOMAIN, {}).get(sensor._entry.entry_id)  # type: ignore[attr-defined]
-    if not isinstance(entry_data, dict):
+    entry_data = _entry_data(sensor)
+    if entry_data is None:
         return []
     history_store = entry_data.get(DATA_HISTORY_STORE)
     if history_store is None:
@@ -720,14 +766,15 @@ class OsrsLastDeathSensor(SensorEntity):
         death = self._state.last_death
         attrs: dict[str, Any] = {}
         if death:
+            icons = _icon_resolver(self)
             attrs.update(
                 {
                     "value_lost": death.get("valueLost", 0),
                     "danger": death.get("danger"),
                     "killer_name": death.get("killerName"),
                     "killer_npc_id": death.get("killerNpcId"),
-                    "kept_items": death.get("keptItems", []),
-                    "lost_items": death.get("lostItems", []),
+                    "kept_items": _items_with_icons(death.get("keptItems", []), icons),
+                    "lost_items": _items_with_icons(death.get("lostItems", []), icons),
                     "location": death.get("location"),
                     "timestamp": death.get("timestamp"),
                 }
@@ -768,35 +815,56 @@ class OsrsLastLootSensor(SensorEntity):
         self._state = state
         self._attr_unique_id = f"{state.account_hash}_last_loot"
 
+    @staticmethod
+    def _notable_item(loot: dict[str, Any]) -> dict[str, Any] | None:
+        """The highest-value item, else the first item (if it has a name)."""
+        highest = loot.get("highestValueItem")
+        if isinstance(highest, dict) and highest.get("name"):
+            return highest
+        items = loot.get("items")
+        if isinstance(items, list) and items:
+            first = items[0]
+            if isinstance(first, dict) and first.get("name"):
+                return first
+        return None
+
     @property
     def native_value(self) -> str | None:
         """The most notable item from the drop (not the NPC/source)."""
         loot = self._state.last_loot
         if not loot:
             return None
-        highest = loot.get("highestValueItem")
-        if isinstance(highest, dict) and highest.get("name"):
-            return highest["name"]
-        items = loot.get("items")
-        if isinstance(items, list) and items:
-            first = items[0]
-            if isinstance(first, dict) and first.get("name"):
-                return first["name"]
+        item = self._notable_item(loot)
+        if item is not None:
+            return item["name"]
         source = loot.get("source")
         if isinstance(source, dict) and source.get("text"):
             return source["text"]
         return "Loot"
 
     @property
+    def entity_picture(self) -> str | None:
+        """Icon of the item the state names."""
+        loot = self._state.last_loot
+        icons = _icon_resolver(self)
+        if not loot or icons is None:
+            return None
+        item = self._notable_item(loot)
+        if item is None:
+            return None
+        return icons.item_url(item.get("id"), item.get("quantity", 1))
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         loot = self._state.last_loot
         attrs: dict[str, Any] = {}
         if loot:
+            icons = _icon_resolver(self)
             attrs.update(
                 {
                     "total_value": loot.get("totalValue", 0),
-                    "highest_value_item": loot.get("highestValueItem"),
-                    "items": loot.get("items", []),
+                    "highest_value_item": _with_icon(loot.get("highestValueItem"), icons),
+                    "items": _items_with_icons(loot.get("items", []), icons),
                     "source": loot.get("source"),
                     "type": loot.get("type"),
                     "npc_id": loot.get("npcId"),
@@ -845,6 +913,15 @@ class OsrsLastCollectionLogSensor(SensorEntity):
         if not item:
             return None
         return item.get("itemName") or "Unknown item"
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Icon of the item (the plugin sends itemId -1 when it's unknown)."""
+        item = self._state.last_collection_log
+        icons = _icon_resolver(self)
+        if not item or icons is None:
+            return None
+        return icons.item_url(item.get("itemId"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -917,6 +994,12 @@ class OsrsAccountDetailSensor(SensorEntity):
         if detail is None:
             return None
         return detail.get("value")
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Skill icon; None for a key that isn't one of the game's skills."""
+        icons = _icon_resolver(self)
+        return icons.skill_url(self._detail_key) if icons else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

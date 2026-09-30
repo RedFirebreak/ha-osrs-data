@@ -34,15 +34,22 @@
       },
       "settings": {
         "title": "Integration Settings",
-        "description": "Tune history retention, deduplication, and presence detection. Changes take effect immediately (the integration reloads).",
+        "description": "Tune history retention, deduplication, presence detection and game icons. Changes take effect immediately (the integration reloads).",
         "data": {
           "death_limit": "Death history entries kept",
           "loot_limit": "Loot history entries kept",
           "default_limit": "Default history entries kept (other event types)",
           "dedupe_ttl": "Deduplication window (seconds)",
-          "presence_timeout": "Presence timeout fallback (seconds)"
+          "presence_timeout": "Presence timeout fallback (seconds)",
+          "icons_base_url": "Icon URL"
+        },
+        "data_description": {
+          "icons_base_url": "Where item, skill and equipment-slot icons are loaded from. Leave empty to turn icons off, or enter the URL of your own mirror."
         }
       }
+    },
+    "error": {
+      "invalid_icons_url": "Enter a URL that starts with http:// or https://, or leave the field empty."
     }
   },
   "services": {

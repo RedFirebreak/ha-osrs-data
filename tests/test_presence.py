@@ -618,14 +618,19 @@ class TestPresenceCheckCallback:
 
     async def _setup_and_capture(self):
         import custom_components.osrs_data as integration
-        from custom_components.osrs_data.const import DOMAIN, DATA_ACCOUNT_STORE
+        from custom_components.osrs_data.const import (
+            CONF_ICONS_BASE_URL,
+            DATA_ACCOUNT_STORE,
+            DOMAIN,
+        )
 
         hass = MagicMock()
         # Views are out of scope here; skip registering them.
         hass.data = {DOMAIN: {"_views_registered": True, "_pair_view_registered": True}}
         hass.config_entries.async_forward_entry_setups = AsyncMock()
         entry = _make_entry()
-        entry.options = {}
+        # Icons off: their refresh timer is not what these tests check.
+        entry.options = {CONF_ICONS_BASE_URL: ""}
         store = MagicMock()
         store.async_load = AsyncMock(return_value=None)
 

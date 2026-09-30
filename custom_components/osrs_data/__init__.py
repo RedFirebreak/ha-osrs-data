@@ -29,6 +29,7 @@ from .const import (
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
     DATA_EVENT_DEDUPE_CACHE,
+    DATA_ICON_RESOLVER,
     DATA_PAIRING_STORE,
     DATA_STORE,
     CONF_DEATH_LIMIT,
@@ -36,10 +37,12 @@ from .const import (
     CONF_DEFAULT_LIMIT,
     CONF_DEDUPE_TTL,
     CONF_PRESENCE_TIMEOUT,
+    CONF_ICONS_BASE_URL,
     DEFAULT_DEATH_LIMIT,
     DEFAULT_LOOT_LIMIT,
     DEFAULT_HISTORY_LIMIT,
     DEFAULT_DEDUPE_TTL,
+    DEFAULT_ICONS_BASE_URL,
     PAIRING_CODE_TTL,
     PRESENCE_CHECK_INTERVAL,
     PRESENCE_TIMEOUT,
@@ -47,10 +50,14 @@ from .const import (
 )
 from .dedupe import EventDedupeCache
 from .history import HistoryStore
+from .icons import IconResolver
 from .pairing import PairingStore
 from .storage import get_store
 
 PLATFORMS: list[str] = ["sensor", "binary_sensor"]
+
+# How often the icon CDN's stack tables are fetched again.
+ICONS_REFRESH_INTERVAL = timedelta(hours=24)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,6 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     default_limit = opts.get(CONF_DEFAULT_LIMIT, DEFAULT_HISTORY_LIMIT)
     dedupe_ttl = opts.get(CONF_DEDUPE_TTL, DEFAULT_DEDUPE_TTL)
     presence_timeout = opts.get(CONF_PRESENCE_TIMEOUT, PRESENCE_TIMEOUT)
+    icon_resolver = IconResolver(opts.get(CONF_ICONS_BASE_URL, DEFAULT_ICONS_BASE_URL))
 
     history_store = HistoryStore(limits=history_limits, default_limit=default_limit)
     account_store = AccountStore(presence_timeout=presence_timeout)
@@ -135,6 +143,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_EVENT_DEDUPE_CACHE: EventDedupeCache(ttl=dedupe_ttl),
         DATA_PAIRING_STORE: pairing_store,
         DATA_STORE: store,
+        DATA_ICON_RESOLVER: icon_resolver,
     }
 
     # Reload the entry when options change so new limits/TTLs take effect.
@@ -277,6 +286,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, _check_presence, timedelta(seconds=PRESENCE_CHECK_INTERVAL)
     )
     entry.async_on_unload(unsub_presence)
+
+    # ── Icon stack tables (fetched in the background, never blocks setup)
+    if icon_resolver.enabled:
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        async def _refresh_icons() -> None:
+            if await icon_resolver.async_refresh(async_get_clientsession(hass)):
+                # Stackable items (coins, …) now resolve to their stack
+                # variant: write the entities' attributes again.
+                for acct in account_store.accounts:
+                    async_dispatcher_send(hass, SIGNAL_ACCOUNT_UPDATED, acct.account_hash)
+
+        @callback
+        def _schedule_icon_refresh(_now: datetime | None = None) -> None:
+            entry.async_create_background_task(
+                hass, _refresh_icons(), f"{DOMAIN} icon stack tables"
+            )
+
+        _schedule_icon_refresh()
+        entry.async_on_unload(
+            async_track_time_interval(hass, _schedule_icon_refresh, ICONS_REFRESH_INTERVAL)
+        )
 
     # Fire dispatcher signals for restored accounts so sensor entities
     # are re-created with their persisted values.
