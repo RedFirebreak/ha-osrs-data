@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Game icons:** item, skill and equipment-slot icons from the icon CDN (https://icons.scapekeeper.com). Skill sensors, **Last Loot** and **Last Collection Log** show the icon as their entity picture. Inventory, equipment, loot and death items have an `icon` attribute (the right stack for coins and other stackables), and **Equipment** has `slot_icons` with the empty-slot silhouettes. The new **Icon URL** option points at a mirror, or turns icons off when it is empty. Both example dashboards show the icons.
+
 ### Fixed
 
 - **Wrong PC clock:** a payload timestamp from a clock that ran ahead no longer freezes sensors or makes the account go offline while data is still arriving. Timestamps are capped at the time Home Assistant receives them, a snapshot is only compared with earlier snapshots from the same RuneLite client, and every payload keeps the account online. A future timestamp stored by an earlier version is dropped on startup.

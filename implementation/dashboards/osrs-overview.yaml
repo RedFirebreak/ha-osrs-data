@@ -73,6 +73,20 @@ cards:
       prefix: "Total value: "
       suffix: " gp"
 
+  # The items of the last drop, with their icons. Icons come from the
+  # integration's icon URL option; an item without one shows its name.
+  - type: markdown
+    title: Last loot items
+    content: |
+      {% set items = state_attr('sensor.osrs_myrsn_last_loot', 'items') or [] %}
+      {% if items | length == 0 %}
+      _No loot recorded yet._
+      {% else %}
+      {% for item in items if item.name is defined -%}
+      {% if item.icon %}<img src="{{ item.icon }}" alt="" width="36" height="32"> {% endif %}{{ item.name }} x{{ item.quantity | default(1) }}<br>
+      {% endfor %}
+      {% endif %}
+
   # A markdown card that renders the "recent" history attribute the
   # Last Death / Last Loot sensors expose (last 10 entries each).
   - type: markdown

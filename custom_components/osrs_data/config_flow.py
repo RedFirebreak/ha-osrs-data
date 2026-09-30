@@ -18,10 +18,12 @@ from .const import (
     CONF_DEFAULT_LIMIT,
     CONF_DEDUPE_TTL,
     CONF_PRESENCE_TIMEOUT,
+    CONF_ICONS_BASE_URL,
     DEFAULT_DEATH_LIMIT,
     DEFAULT_LOOT_LIMIT,
     DEFAULT_HISTORY_LIMIT,
     DEFAULT_DEDUPE_TTL,
+    DEFAULT_ICONS_BASE_URL,
     PRESENCE_TIMEOUT,
 )
 from .pairing import _generate_pairing_code
@@ -169,10 +171,19 @@ class OsrsDataOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_settings(self, user_input=None):
         """Edit configurable integration settings (stored in entry.options)."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # The frontend leaves a cleared text field out: that means
+            # "no icon URL", which turns icons off.
+            icons_url = user_input.get(CONF_ICONS_BASE_URL, "").strip()
+            if icons_url and not icons_url.lower().startswith(("http://", "https://")):
+                errors[CONF_ICONS_BASE_URL] = "invalid_icons_url"
+            else:
+                return self.async_create_entry(
+                    title="", data={**user_input, CONF_ICONS_BASE_URL: icons_url}
+                )
 
-        opts = self.config_entry.options
+        opts = {**self.config_entry.options, **(user_input or {})}
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -195,9 +206,21 @@ class OsrsDataOptionsFlow(config_entries.OptionsFlow):
                     CONF_PRESENCE_TIMEOUT,
                     default=opts.get(CONF_PRESENCE_TIMEOUT, PRESENCE_TIMEOUT),
                 ): vol.All(int, vol.Range(min=30, max=86400)),
+                # No default: a default would come back when the field is
+                # cleared, so icons could never be turned off.
+                vol.Optional(
+                    CONF_ICONS_BASE_URL,
+                    description={
+                        "suggested_value": opts.get(
+                            CONF_ICONS_BASE_URL, DEFAULT_ICONS_BASE_URL
+                        )
+                    },
+                ): str,
             }
         )
-        return self.async_show_form(step_id="settings", data_schema=schema)
+        return self.async_show_form(
+            step_id="settings", data_schema=schema, errors=errors
+        )
 
     async def async_step_pair_code(self, user_input=None):
         """Show the pairing code."""

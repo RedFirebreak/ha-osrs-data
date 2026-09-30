@@ -104,8 +104,8 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | Sensor | State | Key Attributes |
 |--------|-------|----------------|
 | **Player Info** | Player name | `display_name`, `previous_names`, `account_type`, `world`, `world_types`, `last_update`, `plugin_version`, `events` |
-| **Inventory** | Occupied slot count | `items` (list of item dicts), `slots_used`, `slots_total` (28), `received` |
-| **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD`; `received` |
+| **Inventory** | Occupied slot count | `items` (list of item dicts with an `icon`, see [Game icons](#game-icons)), `slots_used`, `slots_total` (28), `received` |
+| **Equipment** | Number of equipped slots | One key per slot: `HEAD`, `CAPE`, `WEAPON`, `BODY`, `LEGS`, `GLOVES`, `BOOTS`, `AMMO`, `AMMO_EXTRA`, `AMULET`, `RING`, `SHIELD` (an equipped item has an `icon`); `slot_icons`; `received` |
 | **Health** | Current HP | `current`, `max`, `last_update`, `received` |
 | **Prayer Points** | Current prayer points | `current`, `max`, `last_update`, `received` |
 | **Location** | `x, y` coordinates | `x`, `y`, `plane`, `last_update`, `received` |
@@ -113,10 +113,10 @@ The integration automatically creates a **Status** sensor (shows `ready` with th
 | **Game State** | RuneLite client game state | `last_update` |
 | **Total Level** | Sum of all skill levels | `total_xp`, `skill_count`, `last_update` |
 | **Combat Level** | Computed OSRS combat level | `last_update` |
-| **Last Death** | Killer name of the most recent death | `value_lost`, `danger`, `killer_name`, `killer_npc_id`, `kept_items`, `lost_items`, `location`, `timestamp`, `recent` |
-| **Last Loot** | Source of the most recent loot drop | `total_value`, `highest_value_item`, `items`, `source`, `type`, `npc_id`, `timestamp`, `recent` |
-| **Last Collection Log** | Most recent new collection log item | `item_id` (`null` if unknown), `value`, `kill_count`, `timestamp`, `recent` |
-| **\<Skill\> Level** *(per skill)* | Skill level | `xp`, `last_update` |
+| **Last Death** | Killer name of the most recent death | `value_lost`, `danger`, `killer_name`, `killer_npc_id`, `kept_items`, `lost_items` (items with an `icon`), `location`, `timestamp`, `recent` |
+| **Last Loot** | Most notable item of the most recent loot drop (picture: its icon) | `total_value`, `highest_value_item`, `items` (items with an `icon`), `source`, `type`, `npc_id`, `timestamp`, `recent` |
+| **Last Collection Log** | Most recent new collection log item (picture: its icon) | `item_id` (`null` if unknown), `value`, `kill_count`, `timestamp`, `recent` |
+| **\<Skill\> Level** *(per skill)* | Skill level (picture: the skill icon) | `xp`, `last_update` |
 | **\<EVENT\> Total** *(per event type)* | Cumulative event count | `last_fired` |
 
 Skill-level sensors are created dynamically — one per OSRS skill (up to 23) — the first time stats data arrives for an account. **Total Level** and **Combat Level** are derived from each skill's XP (matching the way the game computes them, so they are unaffected by temporary stat boosts). **Last Death**, **Last Loot** and **Last Collection Log** populate the first time such an event arrives; **Last Loot**'s state is the most notable item from the drop, and their `recent` attribute holds the last 10 entries from the history buffer (see [Event history](#event-history)). Their `timestamp` is when the event happened in game (the plugin's event timestamp), not when Home Assistant received it.
@@ -178,8 +178,33 @@ Go to **Settings → Devices & services → OSRS Data → Configure → Edit int
 | Default history entries kept | 50 | Buffer size for every other event type |
 | Deduplication window (seconds) | 30 | How long duplicate events without an `eventId` are suppressed |
 | Presence timeout fallback (seconds) | 1500 | Offline threshold used when no `tickDelay` is known |
+| Icon URL | `https://icons.scapekeeper.com` | Where game icons are loaded from. Leave it empty to turn icons off. See [Game icons](#game-icons) |
 
 Changing options reloads the integration so the new values take effect immediately.
+
+### Game icons
+
+Sensors link to OSRS item, skill and equipment-slot icons on the icon CDN, **https://icons.scapekeeper.com**. Home Assistant only stores the links. Your browser loads the images when a dashboard shows them.
+
+| Where | What |
+|-------|------|
+| `<Skill> Level` sensors | Entity picture: the skill icon |
+| **Last Loot** | Entity picture: the icon of the item the state names |
+| **Last Collection Log** | Entity picture: the item's icon (none if the plugin didn't know the item id) |
+| **Inventory** `items`, **Last Loot** `items` and `highest_value_item`, **Last Death** `kept_items` and `lost_items`, and each **Equipment** slot | An `icon` key on each item. For a stack (coins, …) the icon shows the stack size, as in game |
+| **Equipment** `slot_icons` | The empty-slot silhouette for each slot (`HEAD`, `CAPE`, …). `AMMO_EXTRA` has none |
+
+An item without a known id has no `icon` key, and an empty equipment slot stays an empty dict. When icons are off, there are no `icon` keys, no `slot_icons` and no entity pictures. The `recent` history attributes have no icons.
+
+Show an item icon at 36×32 px, for example in a markdown card:
+
+```jinja
+{% for item in state_attr('sensor.osrs_myrsn_inventory', 'items') or [] %}
+{% if item.icon %}<img src="{{ item.icon }}" width="36" height="32">{% endif %} {{ item.name }}
+{% endfor %}
+```
+
+**Turn icons off or self-host:** set **Icon URL** in the [options](#options). Leave it empty to turn icons off, or enter the URL of your own copy. Each icon release is also published as a tarball with the same layout: extract it into any static web server and add an `Access-Control-Allow-Origin: *` header. The integration downloads the stack table (`/data/stacks.json`) from that URL when it starts and then once a day. If the download fails, icons still work, but a stack shows the single-item icon.
 
 ### Event deduplication
 

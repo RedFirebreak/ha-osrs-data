@@ -513,3 +513,130 @@ class TestReceivedAttribute:
             assert sensor.extra_state_attributes["received"] is False, type(sensor).__name__
         assert sensors[0].native_value == 1
         assert sensors[4].native_value == "1, 2"
+
+
+class TestIcons:
+    """Icon URLs from the entry's IconResolver (icons.scapekeeper.com contract)."""
+
+    BASE = "https://icons.example"
+
+    def _attach(self, sensor, base=BASE):
+        from custom_components.osrs_data.const import DATA_ICON_RESOLVER, DOMAIN
+        from custom_components.osrs_data.icons import IconResolver
+
+        resolver = IconResolver(base)
+        resolver.stacks = {"995": [[2, 996], [100, 1001], [250, 1002]]}
+        hass = MagicMock()
+        hass.data = {DOMAIN: {sensor._entry.entry_id: {DATA_ICON_RESOLVER: resolver}}}
+        sensor.hass = hass
+        return sensor
+
+    def test_skill_entity_picture(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "skills": {
+                "Attack": {"xp": 1000, "level": 10},
+                "Overall": {"xp": 1000, "level": 10},
+            },
+        })
+        attack = self._attach(OsrsAccountDetailSensor(_make_entry(), state, "hash1", "Attack"))
+        overall = self._attach(OsrsAccountDetailSensor(_make_entry(), state, "hash1", "Overall"))
+        assert attack.entity_picture == f"{self.BASE}/skills/attack.png"
+        assert overall.entity_picture is None
+
+    def test_inventory_items_get_quantity_aware_icon(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "inventory": [
+                {"id": 995, "name": "Coins", "quantity": 250},
+                {"id": 4151, "name": "Abyssal whip", "quantity": 1},
+                {"id": None, "name": "Mystery", "quantity": 1},
+            ],
+        })
+        sensor = self._attach(OsrsInventorySensor(_make_entry(), state, "hash1"))
+        items = sensor.extra_state_attributes["items"]
+        assert items[0]["icon"] == f"{self.BASE}/items/1002.webp"
+        assert items[1]["icon"] == f"{self.BASE}/items/4151.webp"
+        assert "icon" not in items[2]
+        # The stored inventory is not changed.
+        assert all("icon" not in item for item in state.inventory)
+
+    def test_equipment_icons_and_slot_silhouettes(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "equipment": {"WEAPON": {"id": 4151, "name": "Abyssal whip", "quantity": 1}},
+        })
+        sensor = self._attach(OsrsEquipmentSensor(_make_entry(), state, "hash1"))
+        attrs = sensor.extra_state_attributes
+        assert attrs["WEAPON"]["icon"] == f"{self.BASE}/items/4151.webp"
+        # Empty slots stay empty; their silhouette is in slot_icons.
+        assert attrs["HEAD"] == {}
+        assert attrs["slot_icons"]["HEAD"] == f"{self.BASE}/slots/head.png"
+        assert "AMMO_EXTRA" not in attrs["slot_icons"]
+        assert "icon" not in state.equipment["WEAPON"]
+
+    def test_last_loot_icons(self):
+        state = AccountState("hash1", "Player")
+        state.record_game_event("LOOT", {
+            "highestValueItem": {"id": 995, "name": "Coins", "quantity": 100},
+            "items": [
+                {"id": 995, "name": "Coins", "quantity": 100},
+                {"id": 526, "name": "Bones", "quantity": 1},
+                "not an item",
+            ],
+        })
+        sensor = self._attach(OsrsLastLootSensor(_make_entry(), state, "hash1"))
+        attrs = sensor.extra_state_attributes
+        assert attrs["highest_value_item"]["icon"] == f"{self.BASE}/items/1001.webp"
+        assert [i["icon"] for i in attrs["items"][:2]] == [
+            f"{self.BASE}/items/1001.webp",
+            f"{self.BASE}/items/526.webp",
+        ]
+        assert attrs["items"][2] == "not an item"
+        assert sensor.entity_picture == f"{self.BASE}/items/1001.webp"
+        assert "icon" not in state.last_loot["highestValueItem"]
+
+    def test_last_death_item_icons(self):
+        state = AccountState("hash1", "Player")
+        state.record_game_event("DEATH", {
+            "keptItems": [{"id": 6585, "name": "Amulet of fury", "quantity": 1}],
+            "lostItems": [{"id": 995, "name": "Coins", "quantity": 30}],
+        })
+        attrs = self._attach(OsrsLastDeathSensor(_make_entry(), state, "hash1")).extra_state_attributes
+        assert attrs["kept_items"][0]["icon"] == f"{self.BASE}/items/6585.webp"
+        assert attrs["lost_items"][0]["icon"] == f"{self.BASE}/items/996.webp"
+
+    def test_collection_log_entity_picture(self):
+        state = AccountState("hash1", "Player")
+        state.record_game_event("COLLECTIONLOG", {"itemName": "Abyssal whip", "itemId": 4151})
+        sensor = self._attach(OsrsLastCollectionLogSensor(_make_entry(), state, "hash1"))
+        assert sensor.entity_picture == f"{self.BASE}/items/4151.webp"
+        state.record_game_event("COLLECTIONLOG", {"itemName": "Odd thing", "itemId": -1})
+        assert sensor.entity_picture is None
+
+    def test_icons_off_adds_nothing(self):
+        state = AccountState("hash1", "Player")
+        state.update_player_data({
+            "skills": {"Attack": {"xp": 1000, "level": 10}},
+            "inventory": [{"id": 4151, "name": "Abyssal whip", "quantity": 1}],
+            "equipment": {"WEAPON": {"id": 4151, "name": "Abyssal whip", "quantity": 1}},
+        })
+        state.record_game_event("LOOT", {"items": [{"id": 526, "name": "Bones", "quantity": 1}]})
+        state.record_game_event("COLLECTIONLOG", {"itemName": "Abyssal whip", "itemId": 4151})
+        entry = _make_entry()
+        for base in ("", None):
+            detail = OsrsAccountDetailSensor(entry, state, "hash1", "Attack")
+            inventory = OsrsInventorySensor(entry, state, "hash1")
+            equipment = OsrsEquipmentSensor(entry, state, "hash1")
+            loot = OsrsLastLootSensor(entry, state, "hash1")
+            clog = OsrsLastCollectionLogSensor(entry, state, "hash1")
+            if base is not None:  # "" = turned off; None = no hass attached
+                for sensor in (detail, inventory, equipment, loot, clog):
+                    self._attach(sensor, base)
+            assert detail.entity_picture is None
+            assert loot.entity_picture is None
+            assert clog.entity_picture is None
+            assert "icon" not in inventory.extra_state_attributes["items"][0]
+            assert "icon" not in equipment.extra_state_attributes["WEAPON"]
+            assert "slot_icons" not in equipment.extra_state_attributes
+            assert "icon" not in loot.extra_state_attributes["items"][0]
