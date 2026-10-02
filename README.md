@@ -580,6 +580,44 @@ tests/                          # Automated test suite
 - Individual clients can be revoked without affecting others.
 - No HA access tokens or webhook secrets are ever exposed to the plugin.
 
+## Development
+
+`pytest tests/` runs the unit tests; they need no Home Assistant.
+
+To see the integration running, the `osrs-dev-stack` repository (checked out next to this one; see its
+README) starts a throwaway Home Assistant in Docker on http://localhost:8124 with this checkout's
+`custom_components/osrs_data` mounted in, sets it up and pairs a fake plugin that keeps three made-up
+players alive:
+
+```bash
+node ../osrs-dev-stack/stack.mjs up ha
+```
+
+`node ../osrs-dev-stack/stack.mjs restart ha` loads a code change, `smoke ha` checks that what the
+fake plugin sends arrives as entities, and `logs ha` shows the integration's debug log. `down` stops
+it; `down --purge` also throws the Home Assistant away, so the next `up ha` goes through onboarding
+and this integration's config flow again.
+
+### Chain tests
+
+The unit tests run against a stand-in for Home Assistant's own classes, so they never load the
+integration into a real one. The dev stack's chain tests do, and each follows one rule from what the
+plugin sends to the entities. This is the check to run (by hand, or by a coding agent) before a change
+is called done:
+
+| Changed | Run | What it proves |
+| --- | --- | --- |
+| Payload parsing, the HTTP views, sensors (`parser/`, `api.py`, `sensor.py`, `binary_sensor.py`) | `restart ha`, `smoke ha`, `chain contract` | Every payload the plugin can send gets the status the plugin expects (200, or 400 for one without a named player), and a snapshot shows up as entities. With the hub up as well (`up hub`), the two are compared on one snapshot |
+| Pairing, tokens, revoking a device (`pairing.py`) | `chain revoke` | A second device pairs and sends; once revoked it gets 401, which turns the plugin's connection off |
+| Presence and the offline timeout (`account_store.py`, the presence loop) | `chain presence` | A client that stops without a logout is offline about a minute later |
+| Storage, restoring state, storage migrations (`storage.py`) | `chain persistence` | After a Home Assistant restart the entities are back as they were and the paired device still works |
+| The config flow, setup (`config_flow.py`, `__init__.py`) | `down --purge`, then `up ha` | Bring-up adds the integration through the config flow and pairs during it, as a person would |
+
+`node ../osrs-dev-stack/stack.mjs chain <name>` prints `PASS` or `FAIL` per step and exits 1 on a
+failure; without a name it runs every chain that applies. To look at the result, open
+http://localhost:8124 (no login): the devices are named "OSRS Zezima", "OSRS Iron Mira" and "OSRS
+Lynx Titan".
+
 ## Developer References
 
 - [Home Assistant Developer Documentation](https://developers.home-assistant.io/)
