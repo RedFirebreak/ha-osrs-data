@@ -73,7 +73,7 @@ class OsrsOnlineBinarySensor(BinarySensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:

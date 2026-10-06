@@ -13,6 +13,7 @@ from homeassistant.core import (
     SupportsResponse,
     callback,
 )
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .account_store import AccountStore
@@ -31,6 +32,7 @@ from .const import (
     DATA_EVENT_DEDUPE_CACHE,
     DATA_ICON_RESOLVER,
     DATA_PAIRING_STORE,
+    DATA_RECEIVER_DEVICE_ID,
     DATA_STORE,
     CONF_DEATH_LIMIT,
     CONF_LOOT_LIMIT,
@@ -49,6 +51,7 @@ from .const import (
     SIGNAL_ACCOUNT_UPDATED,
 )
 from .dedupe import EventDedupeCache
+from .device import receiver_device_info
 from .history import HistoryStore
 from .icons import IconResolver
 from .pairing import PairingStore
@@ -137,6 +140,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 PAIRING_CODE_TTL // 60,
             )
 
+    # Every account device is connected via the "OSRS Data" receiver device.
+    # Register it before the platforms are set up: an account device links
+    # to it by its device registry id, so it has to exist by then.
+    receiver_device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, **receiver_device_info(entry)
+    )
+
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_ACCOUNT_STORE: account_store,
         DATA_HISTORY_STORE: history_store,
@@ -144,6 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_PAIRING_STORE: pairing_store,
         DATA_STORE: store,
         DATA_ICON_RESOLVER: icon_resolver,
+        DATA_RECEIVER_DEVICE_ID: receiver_device.id,
     }
 
     # Reload the entry when options change so new limits/TTLs take effect.
