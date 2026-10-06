@@ -18,8 +18,10 @@ from .const import (
     DATA_ACCOUNT_STORE,
     DATA_HISTORY_STORE,
     DATA_ICON_RESOLVER,
+    DATA_RECEIVER_DEVICE_ID,
     SIGNAL_ACCOUNT_UPDATED,
 )
+from .device import receiver_device_info, via_receiver_device
 from .icons import IconResolver
 from .parser.base import EQUIPMENT_SLOTS
 
@@ -127,12 +129,7 @@ class OsrsStatusSensor(SensorEntity):
 
     @property
     def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "OSRS Data",
-            "manufacturer": "Custom",
-            "model": "Event Receiver",
-        }
+        return receiver_device_info(self._entry)
 
 
 # ── Per-account device helpers ──────────────────────────────────────
@@ -178,14 +175,17 @@ def _items_with_icons(items: Any, icons: IconResolver | None) -> Any:
     return [_with_icon(item, icons) for item in items]
 
 
-def _account_device_info(entry: ConfigEntry, state: AccountState) -> dict[str, Any]:
-    """Build device_info for a per-account device."""
+def _account_device_info(entity: Any) -> dict[str, Any]:
+    """Build device_info for the per-account device of an account entity."""
+    entry: ConfigEntry = entity._entry
+    state: AccountState = entity._state
+    entry_data = _entry_data(entity) or {}
     info: dict[str, Any] = {
         "identifiers": {(DOMAIN, state.account_hash)},
         "name": f"OSRS {state.player_name}",
         "manufacturer": "RuneLite",
         "model": "OSRS Account",
-        "via_device": (DOMAIN, entry.entry_id),
+        **via_receiver_device(entry, entry_data.get(DATA_RECEIVER_DEVICE_ID)),
     }
     if state.plugin_version:
         # HA Exporter plugin version (X-Osrs-Exporter-Version header)
@@ -237,7 +237,7 @@ class OsrsPlayerInfoSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -290,7 +290,7 @@ class OsrsInventorySensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -341,7 +341,7 @@ class OsrsSpellbookSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -396,7 +396,7 @@ class OsrsLocationSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -448,7 +448,7 @@ class OsrsPrayerPointsSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -500,7 +500,7 @@ class OsrsHealthSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -559,7 +559,7 @@ class OsrsEquipmentSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -607,7 +607,7 @@ class OsrsGameStateSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -658,7 +658,7 @@ class OsrsTotalLevelSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -706,7 +706,7 @@ class OsrsCombatLevelSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -784,7 +784,7 @@ class OsrsLastDeathSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -876,7 +876,7 @@ class OsrsLastLootSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -943,7 +943,7 @@ class OsrsLastCollectionLogSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -1015,7 +1015,7 @@ class OsrsAccountDetailSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:
@@ -1072,7 +1072,7 @@ class OsrsEventTotalSensor(SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        return _account_device_info(self._entry, self._state)
+        return _account_device_info(self)
 
     @callback
     def _handle_update(self, account_hash: str) -> None:

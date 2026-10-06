@@ -17,6 +17,8 @@ DATA_STORE = "store"
 DATA_PAIRING_STORE = "pairing_store"
 DATA_EVENT_DEDUPE_CACHE = "event_dedupe_cache"
 DATA_ICON_RESOLVER = "icon_resolver"
+# Device registry id of the entry's "OSRS Data" receiver device (see device.py)
+DATA_RECEIVER_DEVICE_ID = "receiver_device_id"
 
 # Dispatcher signal for account updates
 SIGNAL_ACCOUNT_UPDATED = f"{DOMAIN}_account_updated"
